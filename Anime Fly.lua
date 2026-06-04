@@ -1,12 +1,12 @@
 
 --[[
-    Title: Anime Fly Pro (V4 Ultimate - Zero Glitch Edition)
+    Title: Anime Fly Pro (V5 Noclip Edition)
     Author: devansh
-    Description: High-fidelity, universal Roblox Luau flight script.
-                 Features Look-Direction 3D Vector Flight, dynamic sound/VFX,
-                 and a PURE PROCEDURAL Motor6D Animation Engine (No IDs required).
-                 [FIXED] Ground-dragging eliminated. Hitbox permanently locked upright.
-                 [FIXED] UI Toggle switch animation repaired.
+    Description: Bulletproof, crash-resistant Roblox flight script.
+                 Features safe 3D Dot-Product Vector Math, True Noclip bypass,
+                 and independent UI state handling to guarantee flawless toggles.
+                 [FIXED] Math crashes causing "sleep" paralysis are resolved.
+                 [FIXED] Sticking to ground is impossible due to Noclip override.
 --]]
 
 --!strict
@@ -33,6 +33,7 @@ local Settings = {
 local FlightState = {
     IsActive = false,
     CurrentSpeed = Settings.DefaultSpeed,
+    CurrentTilt = 0
 }
 
 local UIColors = {
@@ -46,71 +47,50 @@ local UIColors = {
     InactiveRed = Color3.fromRGB(220, 70, 70)
 }
 
--- References for cleanup
+-- Engine Core References
 local BodyVelocity: BodyVelocity? = nil
 local BodyGyro: BodyGyro? = nil
 local RenderConnection: RBXScriptConnection? = nil
+local NoclipConnection: RBXScriptConnection? = nil
 local CharacterAddedConn: RBXScriptConnection? = nil
-local InputBeganConn: RBXScriptConnection? = nil
 
 -- VFX Storage
 local FlightSound: Sound? = nil
 local CoreAura: Attachment? = nil
 local WindParticles: ParticleEmitter? = nil
 
--- Procedural Joint Storage (Bypasses all Animation Asset Blocks)
-local OriginalC0s = {}
-
 -- =============================================================================
--- PURE PROCEDURAL ANIMATION ENGINE (Zero Animation IDs needed)
+-- SAFEST 3D MATH ENGINE (Crash Proof)
 -- =============================================================================
-local function StoreOriginalJoints(character: Model)
-    OriginalC0s = {}
-    for _, desc in ipairs(character:GetDescendants()) do
-        if desc:IsA("Motor6D") then
-            OriginalC0s[desc.Name] = desc.C0
-        end
-    end
-end
+-- Translates standard joystick movement into camera-relative 3D spherical movement
+local function Get3DFlightVector(camera: Camera, humanoid: Humanoid): Vector3
+    local moveDir = humanoid.MoveDirection
+    if moveDir.Magnitude < 0.01 then return Vector3.zero end
 
-local function SetProceduralPose(character: Model, isFlying: boolean)
-    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local camLook = camera.CFrame.LookVector
+    local camRight = camera.CFrame.RightVector
     
-    if isFlying then
-        for _, desc in ipairs(character:GetDescendants()) do
-            if not desc:IsA("Motor6D") or not OriginalC0s[desc.Name] then continue end
-            
-            local targetCFrame = OriginalC0s[desc.Name]
-            local name = desc.Name
-            
-            -- Tilt the torso forward into Superman pose (Hitbox remains perfectly upright)
-            if name == "RootJoint" or name == "Root" then
-                targetCFrame = targetCFrame * CFrame.Angles(math.rad(-75), 0, 0)
-            -- Force head to look up/forward
-            elseif name == "Neck" then
-                targetCFrame = targetCFrame * CFrame.Angles(math.rad(65), 0, 0)
-            -- Extend arms forward
-            elseif name == "Right Shoulder" or name == "RightShoulder" then
-                targetCFrame = targetCFrame * CFrame.Angles(math.rad(150), 0, math.rad(15))
-            elseif name == "Left Shoulder" or name == "LeftShoulder" then
-                targetCFrame = targetCFrame * CFrame.Angles(math.rad(150), 0, math.rad(-15))
-            -- Streamline legs
-            elseif name == "Right Hip" or name == "RightHip" then
-                targetCFrame = targetCFrame * CFrame.Angles(math.rad(-15), 0, 0)
-            elseif name == "Left Hip" or name == "LeftHip" then
-                targetCFrame = targetCFrame * CFrame.Angles(math.rad(-15), 0, 0)
-            end
-            
-            TweenService:Create(desc, tweenInfo, {C0 = targetCFrame}):Play()
-        end
-    else
-        -- Restore all joints to default standing state
-        for _, desc in ipairs(character:GetDescendants()) do
-            if desc:IsA("Motor6D") and OriginalC0s[desc.Name] then
-                TweenService:Create(desc, tweenInfo, {C0 = OriginalC0s[desc.Name]}):Play()
-            end
-        end
+    -- Extract horizontal looking direction safely
+    local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
+    if flatLook.Magnitude < 0.001 then
+        -- Fallback if looking perfectly straight down/up to avoid math crashes
+        flatLook = camera.CFrame.UpVector
+        flatLook = Vector3.new(flatLook.X, 0, flatLook.Z)
+        if flatLook.Magnitude < 0.001 then return moveDir end
     end
+    flatLook = flatLook.Unit
+
+    -- Calculate how much the joystick is pushing forward/backward and left/right
+    local forwardIntent = moveDir:Dot(flatLook)
+    local rightIntent = moveDir:Dot(camRight)
+
+    -- Project intents onto the TRUE 3D camera vectors
+    local result = (camLook * forwardIntent) + (camRight * rightIntent)
+    
+    if result.Magnitude > 0 then
+        return result.Unit
+    end
+    return Vector3.zero
 end
 
 -- =============================================================================
@@ -167,20 +147,19 @@ local function CleanupVFXAndSFX()
         task.delay(0.3, function() soundToDestroy:Destroy() end)
         FlightSound = nil
     end
-    if CoreAura then
-        CoreAura:Destroy()
-        CoreAura = nil
-    end
+    if CoreAura then CoreAura:Destroy(); CoreAura = nil end
     WindParticles = nil
 end
 
 -- =============================================================================
--- UNIVERSAL 3D FLIGHT LOGIC
+-- UNIVERSAL 3D FLIGHT LOGIC & NOCLIP ENGINE
 -- =============================================================================
 local function CleanupFlight()
     FlightState.IsActive = false
+    FlightState.CurrentTilt = 0
     
     if RenderConnection then RenderConnection:Disconnect(); RenderConnection = nil end
+    if NoclipConnection then NoclipConnection:Disconnect(); NoclipConnection = nil end
     if BodyVelocity then BodyVelocity:Destroy(); BodyVelocity = nil end
     if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
     
@@ -191,7 +170,10 @@ local function CleanupFlight()
             humanoid.PlatformStand = false
             humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
         end
-        SetProceduralPose(character, false)
+        -- Restore Collisions
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = true end
+        end
     end
     
     CleanupVFXAndSFX()
@@ -206,69 +188,73 @@ local function StartFlight()
     if not rootPart or not humanoid then return end
     
     CleanupFlight()
-    StoreOriginalJoints(character)
-    
     FlightState.IsActive = true
     
-    -- Lift character 3 studs so they don't clip floor on ignition
-    rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 3, 0)
+    -- Lift character 5 studs to cleanly exit ground geometry before takeoff
+    rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5, 0)
     
     humanoid.PlatformStand = true
     humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-    
-    SetProceduralPose(character, true)
     SetupVFXAndSFX(rootPart)
 
-    -- Engine Thrust
+    -- Force Movement
     BodyVelocity = Instance.new("BodyVelocity")
     BodyVelocity.Name = "AnimeVelocityEngine"
     BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     BodyVelocity.Velocity = Vector3.zero
     BodyVelocity.Parent = rootPart
     
-    -- Titanium Upright Gyro: Locks Pitch & Roll to 0 so the player CANNOT tip over
+    -- Force Orientation (Superman Tilt)
     BodyGyro = Instance.new("BodyGyro")
     BodyGyro.Name = "AnimeGyroEngine"
     BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    BodyGyro.D = 500
-    BodyGyro.P = 1000000 
+    BodyGyro.D = 400
+    BodyGyro.P = 15000 
     BodyGyro.CFrame = rootPart.CFrame
     BodyGyro.Parent = rootPart
     
     local camera = workspace.CurrentCamera
     
+    -- TRUE NOCLIP BYPASS: Runs before physics calculations to ensure you NEVER stick to the ground
+    NoclipConnection = RunService.Stepped:Connect(function()
+        if not LocalPlayer.Character then return end
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+    
+    -- FLIGHT PHYSICS ENGINE
     RenderConnection = RunService.RenderStepped:Connect(function()
         if not LocalPlayer.Character or not rootPart or not humanoid or not camera then
             CleanupFlight()
             return
         end
         
-        local moveDir = humanoid.MoveDirection
-        local isMoving = moveDir.Magnitude > 0
-        
-        -- 3D Look-Vector Projection Math
-        local target3DVector = Vector3.zero
-        if isMoving then
-            local flatCamCF = CFrame.lookAt(Vector3.zero, camera.CFrame.LookVector * Vector3.new(1, 0, 1))
-            local localMoveDir = flatCamCF:VectorToObjectSpace(moveDir)
-            target3DVector = camera.CFrame:VectorToWorldSpace(localMoveDir)
-        end
+        local target3DVector = Get3DFlightVector(camera, humanoid)
+        local isMoving = target3DVector.Magnitude > 0
         
         -- Apply Movement
         assert(BodyVelocity, "Missing Velocity Engine")
         if isMoving then
-            BodyVelocity.Velocity = target3DVector.Unit * FlightState.CurrentSpeed
+            BodyVelocity.Velocity = target3DVector * FlightState.CurrentSpeed
         else
             BodyVelocity.Velocity = Vector3.zero
         end
         
-        -- Apply Upright Steering (Prevents falling over permanently)
+        -- Smooth Superman Gyro Tilting
+        local targetTilt = isMoving and -80 or 0
+        FlightState.CurrentTilt = FlightState.CurrentTilt + (targetTilt - FlightState.CurrentTilt) * 0.1
+        
         assert(BodyGyro, "Missing Gyro Engine")
         local steerVector = isMoving and target3DVector or camera.CFrame.LookVector
         local flatSteer = Vector3.new(steerVector.X, 0, steerVector.Z)
         
         if flatSteer.Magnitude > 0.001 then
-            BodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatSteer.Unit)
+            local baseCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatSteer.Unit)
+            -- Tilt the entire collision box safely (since we have Noclip active)
+            BodyGyro.CFrame = baseCFrame * CFrame.Angles(math.rad(FlightState.CurrentTilt), 0, 0)
         end
         
         -- Modulation of FX
@@ -282,20 +268,12 @@ local function StartFlight()
             if isMoving then
                 WindParticles.Rate = math.floor((FlightState.CurrentSpeed / Settings.MaxSpeed) * 120)
                 WindParticles.Speed = NumberRange.new(FlightState.CurrentSpeed * 0.15, FlightState.CurrentSpeed * 0.3)
-                CoreAura.CFrame = CFrame.lookAt(Vector3.zero, -target3DVector.Unit)
+                CoreAura.CFrame = CFrame.lookAt(Vector3.zero, -target3DVector)
             else
                 WindParticles.Rate = 0
             end
         end
     end)
-end
-
-local function ToggleFlight()
-    if FlightState.IsActive then
-        CleanupFlight()
-    else
-        StartFlight()
-    end
 end
 
 -- =============================================================================
@@ -468,7 +446,6 @@ RestoreBubble.MouseButton1Click:Connect(function()
     MainFrame.Visible = true
 end)
 
--- Structural Separation Line
 local Line = Instance.new("Frame")
 Line.Size = UDim2.new(1, -32, 0, 1)
 Line.Position = UDim2.new(0, 16, 0, 48)
@@ -476,14 +453,12 @@ Line.BackgroundColor3 = UIColors.Border
 Line.BorderSizePixel = 0
 Line.Parent = MainFrame
 
--- Interactive Content Frame
 local Content = Instance.new("Frame")
 Content.Size = UDim2.new(1, -32, 1, -64)
 Content.Position = UDim2.new(0, 16, 0, 54)
 Content.BackgroundTransparency = 1
 Content.Parent = MainFrame
 
--- Toggle Control Module
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Size = UDim2.new(1, 0, 0, 40)
 ToggleButton.Position = UDim2.new(0, 0, 0, 4)
@@ -513,7 +488,6 @@ ToggleLabel.TextColor3 = UIColors.TextPrimary
 ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
 ToggleLabel.Parent = ToggleButton
 
--- Toggle Visual Switch
 local SwitchBg = Instance.new("Frame")
 SwitchBg.Size = UDim2.new(0, 36, 0, 18)
 SwitchBg.Position = UDim2.new(1, -50, 0.5, -9)
@@ -527,7 +501,6 @@ SwitchBgCorner.Parent = SwitchBg
 
 local SwitchDot = Instance.new("Frame")
 SwitchDot.Size = UDim2.new(0, 14, 0, 14)
--- FIXED: Switch dot absolute alignment 
 SwitchDot.Position = UDim2.new(0, 2, 0.5, -7)
 SwitchDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 SwitchDot.BorderSizePixel = 0
@@ -537,7 +510,6 @@ local SwitchDotCorner = Instance.new("UICorner")
 SwitchDotCorner.CornerRadius = UDim.new(1, 0)
 SwitchDotCorner.Parent = SwitchDot
 
--- Velocity Scale Slider Container
 local SpeedContainer = Instance.new("Frame")
 SpeedContainer.Size = UDim2.new(1, 0, 0, 70)
 SpeedContainer.Position = UDim2.new(0, 0, 0, 52)
@@ -576,7 +548,6 @@ SpeedValue.TextColor3 = UIColors.Accent
 SpeedValue.TextXAlignment = Enum.TextXAlignment.Right
 SpeedValue.Parent = SpeedContainer
 
--- Slider Visual Component Track
 local SliderTrack = Instance.new("TextButton")
 SliderTrack.Size = UDim2.new(1, -28, 0, 6)
 SliderTrack.Position = UDim2.new(0, 14, 0, 42)
@@ -610,11 +581,6 @@ local SliderHandleCorner = Instance.new("UICorner")
 SliderHandleCorner.CornerRadius = UDim.new(1, 0)
 SliderHandleCorner.Parent = SliderHandle
 
-local SliderHandleStroke = Instance.new("UIStroke")
-SliderHandleStroke.Thickness = 1.5
-SliderHandleStroke.Color = UIColors.Accent
-SliderHandleStroke.Parent = SliderHandle
-
 local function AdjustSliderPosition(input: InputObject)
     local width = SliderTrack.AbsoluteSize.X
     local offset = math.clamp(input.Position.X - SliderTrack.AbsolutePosition.X, 0, width)
@@ -635,57 +601,60 @@ SliderTrack.InputBegan:Connect(function(input)
         AdjustSliderPosition(input)
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if sliderActive and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         AdjustSliderPosition(input)
     end
 end)
-
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         sliderActive = false
     end
 end)
 
--- FIXED: UI Interactive Synchronization Loop
-local function SetGUIVisualActiveState()
-    -- Offset 20 is exactly (36 - 14 - 2) which puts the dot perfectly on the right side.
-    local dotTargetPosition = FlightState.IsActive and UDim2.new(0, 20, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
-    local bgTargetColor = FlightState.IsActive and UIColors.ActiveGreen or UIColors.InactiveRed
+-- ABSOLUTE UI STATE SEPARATION (Fixes slider getting stuck)
+local uiToggledState = false
+local function ApplyUIState()
+    local dotTargetPosition = uiToggledState and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+    local bgTargetColor = uiToggledState and UIColors.ActiveGreen or UIColors.InactiveRed
+    local strokeTargetColor = uiToggledState and UIColors.ActiveGreen or UIColors.Border
     
-    TweenService:Create(SwitchDot, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Position = dotTargetPosition
-    }):Play()
-    
-    TweenService:Create(SwitchBg, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        BackgroundColor3 = bgTargetColor
-    }):Play()
-    
-    local strokeTargetColor = FlightState.IsActive and UIColors.ActiveGreen or UIColors.Border
-    TweenService:Create(ToggleStroke, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Color = strokeTargetColor
-    }):Play()
+    TweenService:Create(SwitchDot, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = dotTargetPosition}):Play()
+    TweenService:Create(SwitchBg, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {BackgroundColor3 = bgTargetColor}):Play()
+    TweenService:Create(ToggleStroke, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Color = strokeTargetColor}):Play()
 end
 
 ToggleButton.MouseButton1Click:Connect(function()
-    ToggleFlight()
-    SetGUIVisualActiveState()
+    uiToggledState = not uiToggledState
+    ApplyUIState()
+    
+    if uiToggledState then
+        StartFlight()
+    else
+        CleanupFlight()
+    end
 end)
 
 InputBeganConn = UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Settings.ToggleKey then
-        ToggleFlight()
-        SetGUIVisualActiveState()
+        uiToggledState = not uiToggledState
+        ApplyUIState()
+        
+        if uiToggledState then
+            StartFlight()
+        else
+            CleanupFlight()
+        end
     end
 end)
 
 CharacterAddedConn = LocalPlayer.CharacterAdded:Connect(function()
     CleanupFlight()
-    SetGUIVisualActiveState()
+    uiToggledState = false
+    ApplyUIState()
 end)
 
-print("[Anime Fly Ultimate] Procedural Engine Loaded. Zero-Anim ID Hitbox Lock Active.")
+print("[Anime Fly Master] True Noclip initialized. Ground sticking is permanently impossible.")
 
 
