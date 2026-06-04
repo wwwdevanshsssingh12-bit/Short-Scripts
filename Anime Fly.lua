@@ -1,11 +1,10 @@
 
 --[[
-    Title: Anime Fly Pro (V2 Ultimate) - Debugged Edition
+    Title: Anime Fly Pro (V2 Ultimate) - Absolute Fixed Edition
     Author: devansh
     Description: High-fidelity, universal Roblox Luau flight script.
                  Features Look-Direction 3D Vector Flight, dynamic sound/VFX layers,
-                 and a modern glowing dashboard.
-                 [FIXED] Resolved missing UIColors nil indexing error.
+                 smooth tilt-interpolation, and a robust collision bypass engine.
 --]]
 
 --!strict
@@ -26,10 +25,9 @@ local Settings = {
     MaxSpeed = 500,
     MinSpeed = 15,
     ToggleKey = Enum.KeyCode.F,
+    MinHoverHeight = 5, -- Minimum distance from ground to prevent clipping
     
     -- High-quality Roblox platform assets
-    -- Flight Idle: https://www.roblox.com/library/616006778/Levitation-Idle
-    -- Flight Run (Superman): https://www.roblox.com/library/616013233/Levitation-Run
     IdleAnimationId = "rbxassetid://616006778",
     FlyAnimationId = "rbxassetid://616013233",
     
@@ -41,6 +39,7 @@ local FlightState = {
     IsActive = false,
     CurrentSpeed = Settings.DefaultSpeed,
     LastActiveSpeed = Settings.DefaultSpeed,
+    CurrentTilt = 0, -- Smoothly interpolates between 0 (upright) and -90 (Superman flat)
     ActiveTweens = {}
 }
 
@@ -104,38 +103,30 @@ local function ApplyProceduralFlightPose(character: Model, active: boolean)
     local joints = GetJoints(character)
     
     if active then
-        -- Smoothly tween joints into a majestic, horizontal aerodynamic posture
         local neck = joints["Neck"] or joints["Head"]
-        local waist = joints["Waist"] or joints["Root"] or joints["RootJoint"]
-        local leftShoulder = joints["Left Shoulder"] or joints["LeftShoulder"]
-        local rightShoulder = joints["Right Shoulder"] or joints["RightShoulder"]
-        local leftHip = joints["Left Hip"] or joints["LeftHip"]
-        local rightHip = joints["Right Hip"] or joints["RightHip"]
+        local leftShoulder = joints["Left Shoulder"] or joints["LeftShoulder"] or joints["LeftUpperArm"]
+        local rightShoulder = joints["Right Shoulder"] or joints["RightShoulder"] or joints["RightUpperArm"]
+        local leftHip = joints["Left Hip"] or joints["LeftHip"] or joints["LeftUpperLeg"]
+        local rightHip = joints["Right Hip"] or joints["RightHip"] or joints["RightUpperLeg"]
         
         local info = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
         
         if neck then
-            -- Tilt head up so character looks forward while body is flat
             TweenService:Create(neck, info, {C0 = (OriginalJointTransforms["Neck"] and OriginalJointTransforms["Neck"].C0 or neck.C0) * CFrame.Angles(math.rad(45), 0, 0)}):Play()
         end
         if leftShoulder then
-            -- Arm outstretched forward
             TweenService:Create(leftShoulder, info, {C0 = (OriginalJointTransforms["Left Shoulder"] and OriginalJointTransforms["Left Shoulder"].C0 or leftShoulder.C0) * CFrame.new(-0.2, 0.5, -0.5) * CFrame.Angles(math.rad(160), 0, math.rad(-15))}):Play()
         end
         if rightShoulder then
-            -- Arm outstretched forward
             TweenService:Create(rightShoulder, info, {C0 = (OriginalJointTransforms["Right Shoulder"] and OriginalJointTransforms["Right Shoulder"].C0 or rightShoulder.C0) * CFrame.new(0.2, 0.5, -0.5) * CFrame.Angles(math.rad(160), 0, math.rad(15))}):Play()
         end
         if leftHip then
-            -- Legs aligned streamline
             TweenService:Create(leftHip, info, {C0 = (OriginalJointTransforms["Left Hip"] and OriginalJointTransforms["Left Hip"].C0 or leftHip.C0) * CFrame.Angles(math.rad(-10), 0, 0)}):Play()
         end
         if rightHip then
-            -- Legs aligned streamline
             TweenService:Create(rightHip, info, {C0 = (OriginalJointTransforms["Right Hip"] and OriginalJointTransforms["Right Hip"].C0 or rightHip.C0) * CFrame.Angles(math.rad(-10), 0, 0)}):Play()
         end
     else
-        -- Restore joints smoothly to default
         local info = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
         for name, data in pairs(OriginalJointTransforms) do
             if data.Joint and data.Joint.Parent then
@@ -149,7 +140,6 @@ end
 -- VFX & SFX MANAGEMENT
 -- =============================================================================
 local function SetupVFXAndSFX(rootPart: BasePart)
-    -- Sound instantiation
     FlightSound = Instance.new("Sound")
     FlightSound.Name = "AnimeFlightWind"
     FlightSound.SoundId = Settings.WindSoundId
@@ -159,7 +149,6 @@ local function SetupVFXAndSFX(rootPart: BasePart)
     FlightSound.Parent = rootPart
     FlightSound:Play()
     
-    -- Dynamic particle trails
     CoreAura = Instance.new("Attachment")
     CoreAura.Name = "AnimeFlightAura"
     CoreAura.Position = Vector3.new(0, -1, 0)
@@ -172,7 +161,7 @@ local function SetupVFXAndSFX(rootPart: BasePart)
     WindParticles.LightInfluence = 0
     WindParticles.Color = ColorSequence.new({
         ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-        ColorSequenceKeypoint.new(0.5, UIColors.Accent), -- Matching red accent
+        ColorSequenceKeypoint.new(0.5, UIColors.Accent),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 0, 0))
     })
     WindParticles.Size = NumberSequence.new({
@@ -187,7 +176,7 @@ local function SetupVFXAndSFX(rootPart: BasePart)
         NumberSequenceKeypoint.new(1, 1)
     })
     WindParticles.Lifetime = NumberRange.new(0.4, 0.8)
-    WindParticles.Rate = 0 -- Dynamically controlled
+    WindParticles.Rate = 0
     WindParticles.Speed = NumberRange.new(15, 30)
     WindParticles.SpreadAngle = Vector2.new(10, 10)
     WindParticles.Orientation = Enum.ParticleOrientation.VelocityAligned
@@ -250,6 +239,7 @@ end
 -- =============================================================================
 local function CleanupFlight()
     FlightState.IsActive = false
+    FlightState.CurrentTilt = 0
     
     if RenderConnection then
         RenderConnection:Disconnect()
@@ -269,6 +259,14 @@ local function CleanupFlight()
     local character = LocalPlayer.Character
     if character then
         ApplyProceduralFlightPose(character, false)
+        
+        -- Restore collision properties to all character parts
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+        
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
             humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
@@ -288,10 +286,15 @@ local function StartFlight()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not rootPart or not humanoid then return end
     
-    CleanupFlight() -- Safety reset
+    CleanupFlight() -- Reset old instance configurations
     StoreOriginalJoints(character)
     
     FlightState.IsActive = true
+    FlightState.CurrentTilt = 0
+    
+    -- Altitude Boost: Instantly raise character off the ground to avoid ground-clipping bugs
+    rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 6, 0)
+    
     humanoid:ChangeState(Enum.HumanoidStateType.Physics)
     humanoid.PlatformStand = true
     
@@ -311,8 +314,8 @@ local function StartFlight()
     BodyGyro = Instance.new("BodyGyro")
     BodyGyro.Name = "AnimeGyroEngine"
     BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    BodyGyro.D = 400
-    BodyGyro.P = 8500
+    BodyGyro.D = 450
+    BodyGyro.P = 15000 -- Higher responsiveness to force orientations
     BodyGyro.CFrame = rootPart.CFrame
     BodyGyro.Parent = rootPart
     
@@ -324,23 +327,47 @@ local function StartFlight()
             return
         end
         
-        -- Get the raw movement input from either keyboard or mobile dynamic joystick
+        -- Disable collisions on all limbs every frame to prevent physics locks
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                part.CanCollide = false
+            end
+        end
+        
         local moveDirHorizontal = humanoid.MoveDirection
         local isMoving = moveDirHorizontal.Magnitude > 0
         
-        -- LOOK-DIRECTION 3D CALCULATION:
-        -- Reconstructs the planar joystick vector in camera space so looking up drives the player upward.
+        -- Look-Direction 3D Trajectory Calculation
         local target3DVector = Vector3.zero
         if isMoving then
-            -- Re-orient relative to flat horizontal camera position
             local flatCamCF = CFrame.lookAt(Vector3.zero, camera.CFrame.LookVector * Vector3.new(1, 0, 1))
             local localMoveDir = flatCamCF:VectorToObjectSpace(moveDirHorizontal)
-            
-            -- Project into true camera world coordinate space
             target3DVector = camera.CFrame:VectorToWorldSpace(localMoveDir)
         end
         
-        -- Animation State Controllers
+        -- Raycast Ground Protection Layer
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterDescendantsInstances = {character}
+        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+        local rayOrigin = rootPart.Position
+        local rayDirection = Vector3.new(0, -15, 0) -- Search up to 15 studs downwards
+        local raycastResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+        if raycastResult then
+            local distance = (rayOrigin - raycastResult.Position).Magnitude
+            if distance < Settings.MinHoverHeight then
+                -- Dampen/block downward movement vectors if too close to floor boundaries
+                if target3DVector.Y < 0 then
+                    target3DVector = Vector3.new(target3DVector.X, 0, target3DVector.Z)
+                end
+                -- Apply soft proportional upward lift correction
+                local correction = (Settings.MinHoverHeight - distance) * 0.15
+                rootPart.CFrame = rootPart.CFrame + Vector3.new(0, correction, 0)
+            end
+        end
+        
+        -- Anim/Pose Switcher
         if isMoving then
             if IdleTrack and IdleTrack.IsPlaying then IdleTrack:Stop() end
             if FlyTrack and not FlyTrack.IsPlaying then FlyTrack:Play() end
@@ -352,32 +379,28 @@ local function StartFlight()
             if IdleTrack and not IdleTrack.IsPlaying then IdleTrack:Play() end
         end
         
-        -- Vector Translation Calculations
-        assert(BodyVelocity, "Physics: Velocity body missing.")
+        -- Set velocities
+        assert(BodyVelocity, "Physics: Velocity engine missing.")
         if isMoving then
             BodyVelocity.Velocity = target3DVector.Unit * FlightState.CurrentSpeed
         else
             BodyVelocity.Velocity = Vector3.zero
         end
         
-        -- Aerodynamic Superman Pose Rotation Math
-        assert(BodyGyro, "Physics: Gyro body missing.")
-        if isMoving then
-            local travelDirection = target3DVector.Unit
+        -- Smooth Slerp Orientation Engine
+        local targetTilt = isMoving and -90 or 0
+        FlightState.CurrentTilt = FlightState.CurrentTilt + (targetTilt - FlightState.CurrentTilt) * 0.12 -- Lerp factors
+        
+        assert(BodyGyro, "Physics: Gyro engine missing.")
+        local flatCamCF = CFrame.lookAt(Vector3.zero, camera.CFrame.LookVector * Vector3.new(1, 0, 1))
+        local travelDirection = isMoving and target3DVector.Unit or flatCamCF.LookVector
+        
+        if travelDirection.Magnitude > 0 then
             local lookAtCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + travelDirection)
-            
-            -- Aerodynamic horizontal pitch offset
-            BodyGyro.CFrame = lookAtCFrame * CFrame.Angles(math.rad(-90), 0, 0)
-        else
-            -- Face directly along horizontal camera yaw when stationary
-            local camLook = camera.CFrame.LookVector
-            local yawOnly = Vector3.new(camLook.X, 0, camLook.Z).Unit
-            if yawOnly.Magnitude > 0 then
-                BodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + yawOnly)
-            end
+            BodyGyro.CFrame = lookAtCFrame * CFrame.Angles(math.rad(FlightState.CurrentTilt), 0, 0)
         end
         
-        -- Dynamic SFX & VFX Modulation
+        -- Audio & VFX Modulation
         if FlightSound then
             local currentRatio = isMoving and (FlightState.CurrentSpeed / Settings.MaxSpeed) or 0
             FlightSound.Volume = math.clamp(currentRatio * 0.8, 0, 0.8)
@@ -386,12 +409,12 @@ local function StartFlight()
         
         if WindParticles then
             if isMoving then
-                -- Direct wind emitters backward away from flight path
+                WindParticles.Enabled = true
                 WindParticles.Rate = math.floor((FlightState.CurrentSpeed / Settings.MaxSpeed) * 120)
                 WindParticles.Speed = NumberRange.new(FlightState.CurrentSpeed * 0.15, FlightState.CurrentSpeed * 0.3)
                 CoreAura.CFrame = CFrame.lookAt(Vector3.zero, -target3DVector.Unit)
             else
-                WindParticles.Rate = 0
+                WindParticles.Enabled = false
             end
         end
     end)
@@ -414,7 +437,6 @@ ScreenGui.Name = "AnimeFlyProUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 
--- Safety check to grab CoreGui or fallback to PlayerGui safely
 local targetUIContainer: Instance? = nil
 pcall(function()
     targetUIContainer = CoreGui:FindFirstChild("RobloxGui") or CoreGui
@@ -423,7 +445,6 @@ if not targetUIContainer then
     targetUIContainer = LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Cleanup old GUI instantiations
 local existingUI = targetUIContainer:FindFirstChild("AnimeFlyProUI")
 if existingUI then existingUI:Destroy() end
 ScreenGui.Parent = targetUIContainer
@@ -448,7 +469,6 @@ UIStroke.Color = UIColors.Border
 UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 UIStroke.Parent = MainFrame
 
--- Premium Gradient Accent for Border Frame
 local Gradient = Instance.new("UIGradient")
 Gradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, UIColors.Accent),
