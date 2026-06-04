@@ -1,10 +1,11 @@
 
 --[[
-    Title: Anime Fly Pro (V2 Ultimate)
+    Title: Anime Fly Pro (V2 Ultimate) - Debugged Edition
     Author: devansh
     Description: High-fidelity, universal Roblox Luau flight script.
                  Features Look-Direction 3D Vector Flight, dynamic sound/VFX layers,
                  and a modern glowing dashboard.
+                 [FIXED] Resolved missing UIColors nil indexing error.
 --]]
 
 --!strict
@@ -41,6 +42,18 @@ local FlightState = {
     CurrentSpeed = Settings.DefaultSpeed,
     LastActiveSpeed = Settings.DefaultSpeed,
     ActiveTweens = {}
+}
+
+-- Modern Design Tokens / Color Palette
+local UIColors = {
+    Background = Color3.fromRGB(15, 15, 20),
+    Border = Color3.fromRGB(45, 45, 55),
+    Accent = Color3.fromRGB(240, 75, 75), -- Bold Anime Crimson Accent
+    TextPrimary = Color3.fromRGB(255, 255, 255),
+    TextSecondary = Color3.fromRGB(150, 150, 160),
+    CardBg = Color3.fromRGB(25, 25, 30),
+    ActiveGreen = Color3.fromRGB(60, 210, 120),
+    InactiveRed = Color3.fromRGB(220, 70, 70)
 }
 
 -- References to active instances for cleanup
@@ -159,7 +172,7 @@ local function SetupVFXAndSFX(rootPart: BasePart)
     WindParticles.LightInfluence = 0
     WindParticles.Color = ColorSequence.new({
         ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(240, 75, 75)), -- Matching red accent
+        ColorSequenceKeypoint.new(0.5, UIColors.Accent), -- Matching red accent
         ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 0, 0))
     })
     WindParticles.Size = NumberSequence.new({
@@ -800,4 +813,5 @@ CharacterAddedConn = LocalPlayer.CharacterAdded:Connect(function()
 end)
 
 print("[Anime Fly V2 Pro Loaded] Flight trajectory aims dynamically towards camera coordinates. No buttons needed.")
+
 
