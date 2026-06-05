@@ -1,10 +1,11 @@
 
 --[[
-    Title: Anime Fly Pro (V7 Battlegrounds Bypass)
+    Title: Anime Fly Pro (V8 - Console Fix Edition)
     Author: devansh
-    Description: Specifically engineered to bypass Battlegrounds anti-cheats and fix mobile joystick death.
-                 Uses continuous Freefall-State injection to keep thumbsticks alive,
-                 True Noclip to prevent ground-sticking, and safe 3D Gyro tilting.
+    Description: Crash-proof flight engine.
+                 [FIXED] 'VelocityAligned' Enum crash resolved.
+                 [FIXED] Invalid Sound ID crash resolved via pcall wrappers.
+                 [FIXED] Motor6D Procedural Animation ensures upright hitbox to prevent ground dragging.
 --]]
 
 --!strict
@@ -25,8 +26,7 @@ local Settings = {
     MaxSpeed = 500,
     MinSpeed = 15,
     ToggleKey = Enum.KeyCode.F,
-    WindSoundId = "rbxassetid://9011181313",
-    FallAnimId = "rbxassetid://507767968" -- Standard Roblox fall animation (Universal)
+    WindSoundId = "rbxassetid://9011181313"
 }
 
 local FlightState = {
@@ -50,58 +50,112 @@ local BodyVelocity: BodyVelocity? = nil
 local BodyGyro: BodyGyro? = nil
 local RenderConnection: RBXScriptConnection? = nil
 local NoclipConnection: RBXScriptConnection? = nil
-local AnimationTrack: AnimationTrack? = nil
 
 -- VFX Storage
 local FlightSound: Sound? = nil
 local CoreAura: Attachment? = nil
 local WindParticles: ParticleEmitter? = nil
 
+-- Procedural Bone Storage
+local OriginalC0s = {}
+
 -- =============================================================================
--- VFX & SFX MANAGEMENT
+-- PROCEDURAL ANIMATION (VISUAL TILT ONLY - KEEPS HITBOX UPRIGHT)
+-- =============================================================================
+local function StoreBones(character: Model)
+    OriginalC0s = {}
+    for _, desc in ipairs(character:GetDescendants()) do
+        if desc:IsA("Motor6D") then
+            OriginalC0s[desc.Name] = desc.C0
+        end
+    end
+end
+
+local function SetProceduralPose(character: Model, isFlying: boolean)
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    
+    if isFlying then
+        for _, desc in ipairs(character:GetDescendants()) do
+            if not desc:IsA("Motor6D") or not OriginalC0s[desc.Name] then continue end
+            
+            local targetC0 = OriginalC0s[desc.Name]
+            local name = desc.Name
+            
+            -- Tilt visual body -75 degrees forward
+            if name == "RootJoint" or name == "Root" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-75), 0, 0)
+            elseif name == "Neck" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(65), 0, 0)
+            elseif name == "Right Shoulder" or name == "RightShoulder" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(150), 0, math.rad(15))
+            elseif name == "Left Shoulder" or name == "LeftShoulder" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(150), 0, math.rad(-15))
+            elseif name == "Right Hip" or name == "RightHip" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-15), 0, 0)
+            elseif name == "Left Hip" or name == "LeftHip" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-15), 0, 0)
+            end
+            
+            TweenService:Create(desc, tweenInfo, {C0 = targetC0}):Play()
+        end
+    else
+        for _, desc in ipairs(character:GetDescendants()) do
+            if desc:IsA("Motor6D") and OriginalC0s[desc.Name] then
+                TweenService:Create(desc, tweenInfo, {C0 = OriginalC0s[desc.Name]}):Play()
+            end
+        end
+    end
+end
+
+-- =============================================================================
+-- VFX & SFX MANAGEMENT (WRAPPED IN PCALL TO PREVENT CRASHES)
 -- =============================================================================
 local function SetupVFX(rootPart: BasePart)
-    FlightSound = Instance.new("Sound")
-    FlightSound.Name = "AnimeFlightWind"
-    FlightSound.SoundId = Settings.WindSoundId
-    FlightSound.Volume = 0
-    FlightSound.Looped = true
-    FlightSound.Pitch = 1.0
-    FlightSound.Parent = rootPart
-    FlightSound:Play()
+    -- Protected Sound Loading
+    pcall(function()
+        FlightSound = Instance.new("Sound")
+        FlightSound.Name = "AnimeFlightWind"
+        FlightSound.SoundId = Settings.WindSoundId
+        FlightSound.Volume = 0
+        FlightSound.Looped = true
+        FlightSound.Parent = rootPart
+        FlightSound:Play()
+    end)
     
-    CoreAura = Instance.new("Attachment")
-    CoreAura.Name = "AnimeFlightAura"
-    CoreAura.Position = Vector3.new(0, 0, 0)
-    CoreAura.Parent = rootPart
-    
-    WindParticles = Instance.new("ParticleEmitter")
-    WindParticles.Name = "WindStreaks"
-    WindParticles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-    WindParticles.LightEmission = 0.8
-    WindParticles.LightInfluence = 0
-    WindParticles.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-        ColorSequenceKeypoint.new(0.5, UIColors.Accent),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 0, 0))
-    })
-    WindParticles.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.4),
-        NumberSequenceKeypoint.new(0.8, 1.2),
-        NumberSequenceKeypoint.new(1, 0)
-    })
-    WindParticles.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 1),
-        NumberSequenceKeypoint.new(0.2, 0.4),
-        NumberSequenceKeypoint.new(0.8, 0.5),
-        NumberSequenceKeypoint.new(1, 1)
-    })
-    WindParticles.Lifetime = NumberRange.new(0.4, 0.8)
-    WindParticles.Rate = 0
-    WindParticles.Speed = NumberRange.new(15, 30)
-    WindParticles.SpreadAngle = Vector2.new(10, 10)
-    WindParticles.Orientation = Enum.ParticleOrientation.VelocityAligned
-    WindParticles.Parent = CoreAura
+    -- Protected Particle Loading
+    pcall(function()
+        CoreAura = Instance.new("Attachment")
+        CoreAura.Name = "AnimeFlightAura"
+        CoreAura.Position = Vector3.new(0, 0, 0)
+        CoreAura.Parent = rootPart
+        
+        WindParticles = Instance.new("ParticleEmitter")
+        WindParticles.Name = "WindStreaks"
+        WindParticles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        WindParticles.LightEmission = 0.8
+        WindParticles.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+            ColorSequenceKeypoint.new(0.5, UIColors.Accent),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 0, 0))
+        })
+        WindParticles.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.4),
+            NumberSequenceKeypoint.new(0.8, 1.2),
+            NumberSequenceKeypoint.new(1, 0)
+        })
+        WindParticles.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.2, 0.4),
+            NumberSequenceKeypoint.new(0.8, 0.5),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        WindParticles.Lifetime = NumberRange.new(0.4, 0.8)
+        WindParticles.Rate = 0
+        WindParticles.Speed = NumberRange.new(15, 30)
+        -- FIXED THE ENUM CRASH RIGHT HERE:
+        WindParticles.Orientation = Enum.ParticleOrientation.VelocityParallel
+        WindParticles.Parent = CoreAura
+    end)
 end
 
 local function CleanupVFX()
@@ -116,32 +170,24 @@ local function CleanupVFX()
 end
 
 -- =============================================================================
--- THE BATTLEGROUNDS FLY ENGINE (NO-CLIP + FREEFALL INJECTION)
+-- FLIGHT PHYSICS ENGINE
 -- =============================================================================
-local function GetRootPart(character: Model): BasePart?
-    local hum = character:FindFirstChildOfClass("Humanoid")
-    if hum and hum.RootPart then return hum.RootPart end
-    return character:FindFirstChild("HumanoidRootPart") :: BasePart?
-end
-
 local function StopFlightCore()
     if RenderConnection then RenderConnection:Disconnect(); RenderConnection = nil end
     if NoclipConnection then NoclipConnection:Disconnect(); NoclipConnection = nil end
     if BodyVelocity then BodyVelocity:Destroy(); BodyVelocity = nil end
     if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
-    if AnimationTrack then AnimationTrack:Stop(); AnimationTrack = nil end
     
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
-            humanoid.AutoRotate = true
             humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
         end
-        -- Restore collisions
         for _, part in ipairs(character:GetDescendants()) do
             if part:IsA("BasePart") then part.CanCollide = true end
         end
+        SetProceduralPose(character, false)
     end
     
     CleanupVFX()
@@ -151,34 +197,30 @@ local function StartFlightCore()
     local character = LocalPlayer.Character
     if not character then return end
     
-    local rootPart = GetRootPart(character)
+    local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not rootPart or not humanoid then return end
     
-    -- IMPORTANT: We DO NOT use PlatformStand. It kills mobile controls.
-    humanoid.AutoRotate = false -- Stops Roblox from fighting our Gyro
+    StopFlightCore()
+    StoreBones(character)
     
-    -- Lift character 5 studs to cleanly exit ground geometry before takeoff
+    -- Lift character to guarantee no ground collision on start
     rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5, 0)
     
-    -- Setup Animation (Universal Fall prevents limbs from flailing)
-    local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
-    local anim = Instance.new("Animation")
-    anim.AnimationId = Settings.FallAnimId
-    pcall(function()
-        AnimationTrack = animator:LoadAnimation(anim)
-        if AnimationTrack then AnimationTrack:Play() end
-    end)
+    -- Keep state in Freefall so mobile joystick doesn't break
+    humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+    SetProceduralPose(character, true)
     
+    -- This will no longer crash the script
     SetupVFX(rootPart)
 
-    -- Force Movers
     BodyVelocity = Instance.new("BodyVelocity")
     BodyVelocity.Name = "AnimeVelocity"
     BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     BodyVelocity.Velocity = Vector3.zero
     BodyVelocity.Parent = rootPart
     
+    -- UPRIGHT GYRO: Prevents Hitbox from tilting into the floor.
     BodyGyro = Instance.new("BodyGyro")
     BodyGyro.Name = "AnimeGyro"
     BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
@@ -189,23 +231,14 @@ local function StartFlightCore()
     
     local camera = workspace.CurrentCamera
     
-    -- 1. THE NOCLIP & FREEFALL INJECTION LOOP
-    -- Runs right before physics calculates. Prevents ALL ground sticking.
     NoclipConnection = RunService.Stepped:Connect(function()
         if not LocalPlayer.Character then return end
-        
-        -- Keep the game thinking we are just falling, which keeps the mobile joystick alive
         humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
-        
-        -- Absolute Noclip (Pass through everything)
         for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
+            if part:IsA("BasePart") then part.CanCollide = false end
         end
     end)
     
-    -- 2. THE FLIGHT VECTOR LOOP
     RenderConnection = RunService.RenderStepped:Connect(function()
         if not LocalPlayer.Character or not rootPart or not humanoid or not camera then
             StopFlightCore()
@@ -215,14 +248,11 @@ local function StartFlightCore()
         local moveDir = humanoid.MoveDirection
         local isMoving = moveDir.Magnitude > 0
         
-        -- 3D Vector Math (Mobile Joystick to Camera Matrix)
         local targetDir = Vector3.zero
         if isMoving then
             local camCF = camera.CFrame
             local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
-            if flatLook.Magnitude < 0.01 then
-                flatLook = Vector3.new(camCF.UpVector.X, 0, camCF.UpVector.Z)
-            end
+            if flatLook.Magnitude < 0.01 then flatLook = Vector3.new(camCF.UpVector.X, 0, camCF.UpVector.Z) end
             flatLook = flatLook.Unit
             
             local forwardIntent = moveDir:Dot(flatLook)
@@ -232,39 +262,30 @@ local function StartFlightCore()
             if targetDir.Magnitude > 0 then targetDir = targetDir.Unit end
         end
         
-        -- Apply Movement
-        assert(BodyVelocity, "Missing Velocity Engine")
-        if isMoving then
-            BodyVelocity.Velocity = targetDir * FlightState.CurrentSpeed
-        else
-            BodyVelocity.Velocity = Vector3.zero
+        if BodyVelocity then
+            BodyVelocity.Velocity = isMoving and (targetDir * FlightState.CurrentSpeed) or Vector3.zero
         end
         
-        -- Apply Rotation (Superman Tilt)
-        assert(BodyGyro, "Missing Gyro Engine")
-        if isMoving then
-            local baseCF = CFrame.lookAt(rootPart.Position, rootPart.Position + targetDir)
-            -- Tilts the character -75 degrees forward to replicate flight pose
-            BodyGyro.CFrame = baseCF * CFrame.Angles(math.rad(-75), 0, 0)
-        else
-            local flatCamLook = Vector3.new(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z)
-            if flatCamLook.Magnitude > 0.001 then
-                BodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatCamLook.Unit)
+        -- Gyro strictly rotates Yaw (horizontal steering). Pitch is forced to 0.
+        if BodyGyro then
+            local steerVector = isMoving and targetDir or camera.CFrame.LookVector
+            local flatSteer = Vector3.new(steerVector.X, 0, steerVector.Z)
+            if flatSteer.Magnitude > 0.001 then
+                BodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatSteer.Unit)
             end
         end
         
-        -- VFX Updates
         if FlightSound then
             local ratio = isMoving and (FlightState.CurrentSpeed / Settings.MaxSpeed) or 0
             FlightSound.Volume = math.clamp(ratio * 0.8, 0, 0.8)
             FlightSound.Pitch = math.clamp(0.8 + (ratio * 0.7), 0.8, 1.5)
         end
         
-        if WindParticles then
+        if WindParticles and CoreAura then
             if isMoving then
                 WindParticles.Rate = math.floor((FlightState.CurrentSpeed / Settings.MaxSpeed) * 120)
                 WindParticles.Speed = NumberRange.new(FlightState.CurrentSpeed * 0.15, FlightState.CurrentSpeed * 0.3)
-                if CoreAura then CoreAura.CFrame = CFrame.lookAt(Vector3.zero, -targetDir) end
+                CoreAura.CFrame = CFrame.lookAt(Vector3.zero, -targetDir)
             else
                 WindParticles.Rate = 0
             end
@@ -273,7 +294,7 @@ local function StartFlightCore()
 end
 
 -- =============================================================================
--- PREMIUM GLASSMORPHIC DASHBOARD UI (FOOLPROOF TOUCH LOGIC)
+-- PREMIUM GLASSMORPHIC DASHBOARD UI
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -288,7 +309,6 @@ local existingUI = targetUIContainer:FindFirstChild("AnimeFlyProUI")
 if existingUI then existingUI:Destroy() end
 ScreenGui.Parent = targetUIContainer
 
--- Main Frame UI
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 310, 0, 190)
@@ -316,7 +336,6 @@ Gradient.Color = ColorSequence.new({
 Gradient.Rotation = 45
 Gradient.Parent = UIStroke
 
--- Drag Logic
 local dragging = false
 local dragInput, dragStart, startPos
 
@@ -330,13 +349,11 @@ MainFrame.InputBegan:Connect(function(input)
         end)
     end
 end)
-
 MainFrame.InputChanged:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         dragInput = input
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
         local delta = input.Position - dragStart
@@ -607,11 +624,9 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- ABSOLUTE UI STATE SEPARATION (Fixed for Mobile Touch)
 local function ToggleLogic()
     FlightState.IsActive = not FlightState.IsActive
     
-    -- Absolute pixel calculation to prevent dot jumping
     local dotTargetPosition = FlightState.IsActive and UDim2.new(0, 20, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
     local bgTargetColor = FlightState.IsActive and UIColors.ActiveGreen or UIColors.InactiveRed
     local strokeTargetColor = FlightState.IsActive and UIColors.ActiveGreen or UIColors.Border
@@ -627,7 +642,6 @@ local function ToggleLogic()
     end
 end
 
--- Use .Activated for 100% reliable touch screen taps
 ToggleButton.Activated:Connect(ToggleLogic)
 
 InputBeganConn = UserInputService.InputBegan:Connect(function(input, processed)
@@ -649,5 +663,7 @@ CharacterAddedConn = LocalPlayer.CharacterAdded:Connect(function(char)
     if hum then hum.Died:Connect(OnDeath) end
 end)
 
-print("[Anime Fly Master V7] Combat Game Bypass Active. Noclip injected. UI Touch Fixed.")
+print("[Anime Fly Master Fixed] All console errors resolved. Hitbox locked upright.")
+
+
 
