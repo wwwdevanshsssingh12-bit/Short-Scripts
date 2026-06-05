@@ -1,11 +1,10 @@
 
 --[[
-    Title: Anime Fly Pro (V12 - Zero Animation Cinematic Edition)
+    Title: Anime Fly Pro (V13 - Studio Settings Edition)
     Author: devansh
-    Description: Completely abandons Roblox Animation IDs.
-                 Uses a custom 'Motor6D.Transform' Override Engine to mathematically 
-                 force cinematic Gojo/God-tier poses in real-time.
-                 Features FOV Warping, Sonic Boom SFX, and Flawless Anti-Cheat Bypasses.
+    Description: Cinematic Flight Engine with Zero-Animation Transform overrides.
+                 Features a custom-built HSV Color Picker (Hex Scroller) to dynamically
+                 change Aura colors in real-time, housed in a modern tabbed GUI.
 --]]
 
 --!strict
@@ -26,8 +25,6 @@ local Settings = {
     MaxSpeed = 500,
     MinSpeed = 15,
     ToggleKey = Enum.KeyCode.F,
-    
-    -- Cinematic Audio Assets (Pcalled to prevent crashes)
     WindSoundId = "rbxassetid://9011181313",  
     AuraSoundId = "rbxassetid://4944983210",  
     BoomSoundId = "rbxassetid://6063618146"   
@@ -37,13 +34,18 @@ local FlightState = {
     IsActive = false,
     IsMoving = false,
     CurrentSpeed = Settings.DefaultSpeed,
-    PoseBlend = 0 -- 0 = Hover Idle, 1 = Supersonic Fly
+    PoseBlend = 0,
+    -- Color Settings (Default Gojo Blue)
+    Hue = 0.58,
+    Sat = 1.0,
+    Val = 1.0,
+    AuraColor = Color3.fromHSV(0.58, 1.0, 1.0)
 }
 
 local UIColors = {
     Background = Color3.fromRGB(15, 15, 20),
     Border = Color3.fromRGB(40, 50, 80),
-    Accent = Color3.fromRGB(80, 150, 255), -- Gojo Blue
+    Accent = Color3.fromRGB(80, 150, 255),
     TextPrimary = Color3.fromRGB(255, 255, 255),
     TextSecondary = Color3.fromRGB(180, 180, 190),
     CardBg = Color3.fromRGB(25, 25, 30),
@@ -55,7 +57,6 @@ local UIColors = {
 local FlightVelocity: LinearVelocity? = nil
 local FlightOrientation: AlignOrientation? = nil
 local FlightAttachment: Attachment? = nil
-
 local RenderConnection: RBXScriptConnection? = nil
 local TransformConnection: RBXScriptConnection? = nil
 
@@ -67,6 +68,25 @@ local CoreAuraAttach: Attachment? = nil
 local AuraEmitter: ParticleEmitter? = nil
 local SparkEmitter: ParticleEmitter? = nil
 local StreakEmitter: ParticleEmitter? = nil
+
+local OriginalC0s = {}
+
+-- =============================================================================
+-- DYNAMIC COLOR ENGINE
+-- =============================================================================
+local function UpdateVFXColor()
+    if not AuraEmitter or not SparkEmitter then return end
+    
+    local c = FlightState.AuraColor
+    local energyGradient = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.new(c.R * 0.7, c.G * 0.7, c.B * 0.7)),
+        ColorSequenceKeypoint.new(0.5, c),
+        ColorSequenceKeypoint.new(1, Color3.new(0, 0, 0))
+    })
+    
+    AuraEmitter.Color = energyGradient
+    SparkEmitter.Color = energyGradient
+end
 
 -- =============================================================================
 -- CINEMATIC VFX & SFX ENGINE
@@ -93,15 +113,9 @@ local function SetupVFX(rootPart: BasePart)
         CoreAuraAttach.Name = "CinematicAura"
         CoreAuraAttach.Parent = rootPart
         
-        local EnergyColor = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 200, 255)),
-            ColorSequenceKeypoint.new(0.5, UIColors.Accent),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 50, 255))
-        })
-        
         AuraEmitter = Instance.new("ParticleEmitter")
         AuraEmitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
-        AuraEmitter.LightEmission = 1; AuraEmitter.Color = EnergyColor
+        AuraEmitter.LightEmission = 1
         AuraEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 2.5), NumberSequenceKeypoint.new(1, 0)})
         AuraEmitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 1)})
         AuraEmitter.Lifetime = NumberRange.new(0.5, 0.8)
@@ -110,7 +124,7 @@ local function SetupVFX(rootPart: BasePart)
         
         SparkEmitter = Instance.new("ParticleEmitter")
         SparkEmitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-        SparkEmitter.LightEmission = 1; SparkEmitter.Color = EnergyColor
+        SparkEmitter.LightEmission = 1
         SparkEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 0)})
         SparkEmitter.Transparency = NumberSequence.new(0.2)
         SparkEmitter.Lifetime = NumberRange.new(0.3, 0.6)
@@ -126,6 +140,8 @@ local function SetupVFX(rootPart: BasePart)
         StreakEmitter.Lifetime = NumberRange.new(0.2, 0.4)
         StreakEmitter.Rate = 0; StreakEmitter.Speed = NumberRange.new(40, 80)
         StreakEmitter.Parent = CoreAuraAttach
+        
+        UpdateVFXColor() -- Apply custom colors instantly
     end)
 end
 
@@ -146,49 +162,38 @@ end
 -- CINEMATIC PHYSICS & TRANSFORM ENGINE (ZERO ANIMATIONS)
 -- =============================================================================
 local function ApplyCustomTransformPose(character: Model, isR15: boolean, blend: number)
-    -- God-Tier Hover Pose (Blend = 0)
     local hoverRoot = CFrame.Angles(math.rad(5), math.rad(15), 0)
     local hoverNeck = CFrame.Angles(math.rad(-10), math.rad(-15), 0)
     local hoverRArm = CFrame.Angles(math.rad(-15), 0, math.rad(15))
     local hoverLArm = CFrame.Angles(math.rad(20), 0, math.rad(-20))
 
-    -- Supersonic Flight Pose (Blend = 1) -> Aerodynamic lean, arms swept backwards
     local flyRoot = CFrame.Angles(math.rad(-75), 0, 0)
     local flyNeck = CFrame.Angles(math.rad(65), 0, 0)
     local flyRArm = CFrame.Angles(math.rad(130), 0, math.rad(-15))
     local flyLArm = CFrame.Angles(math.rad(130), 0, math.rad(15))
 
-    -- Smooth transition matrix
     local curRoot = hoverRoot:Lerp(flyRoot, blend)
     local curNeck = hoverNeck:Lerp(flyNeck, blend)
     local curRArm = hoverRArm:Lerp(flyRArm, blend)
     local curLArm = hoverLArm:Lerp(flyLArm, blend)
     local curLegs = CFrame.Angles(math.rad(-10 * blend), 0, 0)
 
-    -- Force application over game's internal animations
     if isR15 then
         local lowerTorso = character:FindFirstChild("LowerTorso")
         if lowerTorso and lowerTorso:FindFirstChild("Root") then lowerTorso["Root"].Transform = curRoot end
-        
         local head = character:FindFirstChild("Head")
         if head and head:FindFirstChild("Neck") then head["Neck"].Transform = curNeck end
-        
         local rArm = character:FindFirstChild("RightUpperArm")
         if rArm and rArm:FindFirstChild("RightShoulder") then rArm["RightShoulder"].Transform = curRArm end
-        
         local lArm = character:FindFirstChild("LeftUpperArm")
         if lArm and lArm:FindFirstChild("LeftShoulder") then lArm["LeftShoulder"].Transform = curLArm end
-        
         local rLeg = character:FindFirstChild("RightUpperLeg")
         if rLeg and rLeg:FindFirstChild("RightHip") then rLeg["RightHip"].Transform = curLegs end
-        
         local lLeg = character:FindFirstChild("LeftUpperLeg")
         if lLeg and lLeg:FindFirstChild("LeftHip") then lLeg["LeftHip"].Transform = curLegs end
     else
-        -- R6 Fallback Engine
         local rootPart = character:FindFirstChild("HumanoidRootPart")
         if rootPart and rootPart:FindFirstChild("RootJoint") then rootPart["RootJoint"].Transform = curRoot end
-        
         local torso = character:FindFirstChild("Torso")
         if torso then
             if torso:FindFirstChild("Neck") then torso["Neck"].Transform = curNeck end
@@ -209,11 +214,8 @@ local function StopFlightCore()
     
     FlightState.IsMoving = false
     
-    -- Smoothly reset camera FOV
     local camera = workspace.CurrentCamera
-    if camera then
-        TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine), {FieldOfView = 70}):Play()
-    end
+    if camera then TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine), {FieldOfView = 70}):Play() end
     
     local character = LocalPlayer.Character
     if character then
@@ -240,13 +242,16 @@ local function StartFlightCore()
     FlightState.PoseBlend = 0
     FlightState.IsMoving = false
     
-    -- Lift character 5 studs to prevent ground clipping
+    OriginalC0s = {}
+    for _, desc in ipairs(character:GetDescendants()) do
+        if desc:IsA("Motor6D") then OriginalC0s[desc.Name] = desc.C0 end
+    end
+    
     rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5, 0)
     humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
     
     SetupVFX(rootPart)
 
-    -- Modern Movers (Completely bypasses physics lockups)
     FlightAttachment = Instance.new("Attachment")
     FlightAttachment.Name = "AnimeFlightHub"
     FlightAttachment.Parent = rootPart
@@ -267,27 +272,17 @@ local function StartFlightCore()
     
     local camera = workspace.CurrentCamera
     
-    -- THE MAGIC OVERRIDE: Runs right before physics calculations
     TransformConnection = RunService.Stepped:Connect(function(time, deltaTime)
         if not LocalPlayer.Character then return end
-        
-        -- Bypass Ragdoll Systems
         humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
-        
-        -- True Noclip
         for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
             if part:IsA("BasePart") then part.CanCollide = false end
         end
-        
-        -- Smooth Pose Blending (Lerp between 0.0 and 1.0)
         local targetBlend = FlightState.IsMoving and 1 or 0
         FlightState.PoseBlend = FlightState.PoseBlend + (targetBlend - FlightState.PoseBlend) * (deltaTime * 8)
-        
-        -- Overwrite game's animations dynamically
         ApplyCustomTransformPose(LocalPlayer.Character, isR15, FlightState.PoseBlend)
     end)
     
-    -- Vector Math & FX Processing
     RenderConnection = RunService.RenderStepped:Connect(function(deltaTime)
         if not LocalPlayer.Character or not rootPart or not humanoid or not camera then
             StopFlightCore()
@@ -297,7 +292,6 @@ local function StartFlightCore()
         local moveDir = humanoid.MoveDirection
         local isCurrentlyMoving = moveDir.Magnitude > 0
         
-        -- Cinematic Takeoff Check
         if isCurrentlyMoving ~= FlightState.IsMoving then
             FlightState.IsMoving = isCurrentlyMoving
             if FlightState.IsMoving then
@@ -306,21 +300,17 @@ local function StartFlightCore()
             end
         end
         
-        -- Dynamic Camera FOV Zoom
         local targetFOV = isCurrentlyMoving and (70 + (FlightState.CurrentSpeed / Settings.MaxSpeed) * 45) or 70
         camera.FieldOfView = camera.FieldOfView + (targetFOV - camera.FieldOfView) * (deltaTime * 6)
         
-        -- 3D Direction Translation
         local targetDir = Vector3.zero
         if isCurrentlyMoving then
             local camCF = camera.CFrame
             local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
             if flatLook.Magnitude < 0.01 then flatLook = Vector3.new(camCF.UpVector.X, 0, camCF.UpVector.Z) end
             flatLook = flatLook.Unit
-            
             local forwardIntent = moveDir:Dot(flatLook)
             local rightIntent = moveDir:Dot(camCF.RightVector)
-            
             targetDir = (camCF.LookVector * forwardIntent) + (camCF.RightVector * rightIntent)
             if targetDir.Magnitude > 0 then targetDir = targetDir.Unit end
         end
@@ -329,7 +319,6 @@ local function StartFlightCore()
             FlightVelocity.VectorVelocity = isCurrentlyMoving and (targetDir * FlightState.CurrentSpeed) or Vector3.zero
         end
         
-        -- Steering Logic (Keeps physical hitbox completely UPRIGHT)
         if FlightOrientation then
             local steerVector = isCurrentlyMoving and targetDir or camera.CFrame.LookVector
             local flatSteer = Vector3.new(steerVector.X, 0, steerVector.Z)
@@ -338,7 +327,6 @@ local function StartFlightCore()
             end
         end
         
-        -- Dynamic Audio & VFX
         if WindSound and AuraSound then
             local ratio = isCurrentlyMoving and (FlightState.CurrentSpeed / Settings.MaxSpeed) or 0
             WindSound.Volume = math.clamp(ratio * 1.2, 0, 1.2)
@@ -362,7 +350,7 @@ local function StartFlightCore()
 end
 
 -- =============================================================================
--- PREMIUM GLASSMORPHIC DASHBOARD UI
+-- PREMIUM GLASSMORPHIC DASHBOARD UI WITH TABS & COLOR PICKER
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -372,55 +360,41 @@ ScreenGui.IgnoreGuiInset = true
 
 local targetUIContainer = CoreGui:FindFirstChild("RobloxGui") or CoreGui
 if not targetUIContainer then targetUIContainer = LocalPlayer:WaitForChild("PlayerGui") end
-
 local existingUI = targetUIContainer:FindFirstChild("AnimeFlyProUI")
 if existingUI then existingUI:Destroy() end
 ScreenGui.Parent = targetUIContainer
 
+-- Increased size for Tabs and Color Picker
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 310, 0, 190)
-MainFrame.Position = UDim2.new(0.5, -155, 0.3, -95)
+MainFrame.Size = UDim2.new(0, 320, 0, 240)
+MainFrame.Position = UDim2.new(0.5, -160, 0.3, -120)
 MainFrame.BackgroundColor3 = UIColors.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Parent = ScreenGui
 
 local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 14)
+UICorner.CornerRadius = UDim.new(0, 12)
 UICorner.Parent = MainFrame
 
 local UIStroke = Instance.new("UIStroke")
-UIStroke.Thickness = 1.8
+UIStroke.Thickness = 1.5
 UIStroke.Color = UIColors.Border
 UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 UIStroke.Parent = MainFrame
-
-local Gradient = Instance.new("UIGradient")
-Gradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, UIColors.Accent),
-    ColorSequenceKeypoint.new(1, UIColors.Border)
-})
-Gradient.Rotation = 45
-Gradient.Parent = UIStroke
 
 local dragging = false
 local dragInput, dragStart, startPos
 
 MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
+        dragging = true; dragStart = input.Position; startPos = MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
     end
 end)
 MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
 end)
 UserInputService.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
@@ -430,51 +404,58 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 local Header = Instance.new("Frame")
-Header.Size = UDim2.new(1, 0, 0, 48)
+Header.Size = UDim2.new(1, 0, 0, 40)
 Header.BackgroundTransparency = 1
 Header.Parent = MainFrame
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -60, 0, 22)
-Title.Position = UDim2.new(0, 16, 0, 10)
+Title.Size = UDim2.new(0, 120, 0, 22)
+Title.Position = UDim2.new(0, 16, 0, 9)
 Title.BackgroundTransparency = 1
 Title.Text = "Anime Fly"
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 17
+Title.TextSize = 16
 Title.TextColor3 = UIColors.TextPrimary
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = Header
 
-local Subtitle = Instance.new("TextLabel")
-Subtitle.Size = UDim2.new(1, -60, 0, 14)
-Subtitle.Position = UDim2.new(0, 16, 0, 28)
-Subtitle.BackgroundTransparency = 1
-Subtitle.Text = "made by devansh"
-Subtitle.Font = Enum.Font.GothamMedium
-Subtitle.TextSize = 10
-Subtitle.TextColor3 = UIColors.TextSecondary
-Subtitle.TextXAlignment = Enum.TextXAlignment.Left
-Subtitle.Parent = Header
+-- TABS
+local TabContainer = Instance.new("Frame")
+TabContainer.Size = UDim2.new(0, 140, 1, 0)
+TabContainer.Position = UDim2.new(1, -170, 0, 0)
+TabContainer.BackgroundTransparency = 1
+TabContainer.Parent = Header
+
+local TabControl = Instance.new("TextButton")
+TabControl.Size = UDim2.new(0.5, 0, 1, 0)
+TabControl.BackgroundTransparency = 1
+TabControl.Text = "Control"
+TabControl.Font = Enum.Font.GothamBold
+TabControl.TextSize = 12
+TabControl.TextColor3 = UIColors.Accent
+TabControl.Parent = TabContainer
+
+local TabColor = Instance.new("TextButton")
+TabColor.Size = UDim2.new(0.5, 0, 1, 0)
+TabColor.Position = UDim2.new(0.5, 0, 0, 0)
+TabColor.BackgroundTransparency = 1
+TabColor.Text = "Aura"
+TabColor.Font = Enum.Font.GothamMedium
+TabColor.TextSize = 12
+TabColor.TextColor3 = UIColors.TextSecondary
+TabColor.Parent = TabContainer
 
 local MinBtn = Instance.new("TextButton")
-MinBtn.Size = UDim2.new(0, 30, 0, 30)
-MinBtn.Position = UDim2.new(1, -42, 0.5, -15)
+MinBtn.Size = UDim2.new(0, 24, 0, 24)
+MinBtn.Position = UDim2.new(1, -30, 0.5, -12)
 MinBtn.BackgroundColor3 = UIColors.CardBg
 MinBtn.BorderSizePixel = 0
 MinBtn.Text = "—"
 MinBtn.Font = Enum.Font.GothamBold
-MinBtn.TextSize = 12
+MinBtn.TextSize = 10
 MinBtn.TextColor3 = UIColors.TextPrimary
 MinBtn.Parent = Header
-
-local MinBtnCorner = Instance.new("UICorner")
-MinBtnCorner.CornerRadius = UDim.new(0, 8)
-MinBtnCorner.Parent = MinBtn
-
-local MinBtnStroke = Instance.new("UIStroke")
-MinBtnStroke.Thickness = 1
-MinBtnStroke.Color = UIColors.Border
-MinBtnStroke.Parent = MinBtn
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
 
 local RestoreBubble = Instance.new("TextButton")
 RestoreBubble.Size = UDim2.new(0, 52, 0, 52)
@@ -487,250 +468,280 @@ RestoreBubble.TextSize = 12
 RestoreBubble.TextColor3 = UIColors.Accent
 RestoreBubble.Visible = false
 RestoreBubble.Parent = ScreenGui
+Instance.new("UICorner", RestoreBubble).CornerRadius = UDim.new(1, 0)
+local rbStroke = Instance.new("UIStroke", RestoreBubble); rbStroke.Color = UIColors.Accent; rbStroke.Thickness = 2
 
-local BubbleCorner = Instance.new("UICorner")
-BubbleCorner.CornerRadius = UDim.new(1, 0)
-BubbleCorner.Parent = RestoreBubble
-
-local BubbleStroke = Instance.new("UIStroke")
-BubbleStroke.Thickness = 2
-BubbleStroke.Color = UIColors.Accent
-BubbleStroke.Parent = RestoreBubble
-
-local bDragging = false
-local bDragStart, bStartPos
-RestoreBubble.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        bDragging = true
-        bDragStart = input.Position
-        bStartPos = RestoreBubble.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then bDragging = false end
-        end)
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if bDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - bDragStart
-        RestoreBubble.Position = UDim2.new(bStartPos.X.Scale, bStartPos.X.Offset + delta.X, bStartPos.Y.Scale, bStartPos.Y.Offset + delta.Y)
-    end
-end)
-
-MinBtn.Activated:Connect(function()
-    MainFrame.Visible = false
-    RestoreBubble.Visible = true
-end)
-
-RestoreBubble.Activated:Connect(function()
-    RestoreBubble.Visible = false
-    MainFrame.Visible = true
-end)
+MinBtn.Activated:Connect(function() MainFrame.Visible = false; RestoreBubble.Visible = true end)
+RestoreBubble.Activated:Connect(function() RestoreBubble.Visible = false; MainFrame.Visible = true end)
 
 local Line = Instance.new("Frame")
 Line.Size = UDim2.new(1, -32, 0, 1)
-Line.Position = UDim2.new(0, 16, 0, 48)
+Line.Position = UDim2.new(0, 16, 0, 40)
 Line.BackgroundColor3 = UIColors.Border
 Line.BorderSizePixel = 0
 Line.Parent = MainFrame
 
-local Content = Instance.new("Frame")
-Content.Size = UDim2.new(1, -32, 1, -64)
-Content.Position = UDim2.new(0, 16, 0, 54)
-Content.BackgroundTransparency = 1
-Content.Parent = MainFrame
+-- PAGE CONTAINERS
+local PageControl = Instance.new("Frame")
+PageControl.Size = UDim2.new(1, -32, 1, -50)
+PageControl.Position = UDim2.new(0, 16, 0, 50)
+PageControl.BackgroundTransparency = 1
+PageControl.Parent = MainFrame
 
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(1, 0, 0, 40)
-ToggleButton.Position = UDim2.new(0, 0, 0, 4)
-ToggleButton.BackgroundColor3 = UIColors.CardBg
-ToggleButton.BorderSizePixel = 0
-ToggleButton.AutoButtonColor = false
-ToggleButton.Text = ""
-ToggleButton.Parent = Content
+local PageColor = Instance.new("Frame")
+PageColor.Size = UDim2.new(1, -32, 1, -50)
+PageColor.Position = UDim2.new(0, 16, 0, 50)
+PageColor.BackgroundTransparency = 1
+PageColor.Visible = false
+PageColor.Parent = MainFrame
 
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(0, 8)
-ToggleCorner.Parent = ToggleButton
+-- TAB LOGIC
+TabControl.Activated:Connect(function()
+    PageControl.Visible = true; PageColor.Visible = false
+    TabControl.TextColor3 = UIColors.Accent; TabControl.Font = Enum.Font.GothamBold
+    TabColor.TextColor3 = UIColors.TextSecondary; TabColor.Font = Enum.Font.GothamMedium
+end)
+TabColor.Activated:Connect(function()
+    PageControl.Visible = false; PageColor.Visible = true
+    TabColor.TextColor3 = UIColors.Accent; TabColor.Font = Enum.Font.GothamBold
+    TabControl.TextColor3 = UIColors.TextSecondary; TabControl.Font = Enum.Font.GothamMedium
+end)
 
-local ToggleStroke = Instance.new("UIStroke")
-ToggleStroke.Thickness = 1
-ToggleStroke.Color = UIColors.Border
-ToggleStroke.Parent = ToggleButton
-
-local ToggleLabel = Instance.new("TextLabel")
-ToggleLabel.Size = UDim2.new(0.6, 0, 1, 0)
-ToggleLabel.Position = UDim2.new(0, 14, 0, 0)
-ToggleLabel.BackgroundTransparency = 1
-ToggleLabel.Text = "God Flight [F]"
-ToggleLabel.Font = Enum.Font.GothamMedium
-ToggleLabel.TextSize = 12
-ToggleLabel.TextColor3 = UIColors.TextPrimary
-ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
-ToggleLabel.Parent = ToggleButton
-
-local SwitchBg = Instance.new("Frame")
-SwitchBg.Size = UDim2.new(0, 36, 0, 18)
-SwitchBg.Position = UDim2.new(1, -50, 0.5, -9)
-SwitchBg.BackgroundColor3 = UIColors.InactiveRed
-SwitchBg.BorderSizePixel = 0
-SwitchBg.Parent = ToggleButton
-
-local SwitchBgCorner = Instance.new("UICorner")
-SwitchBgCorner.CornerRadius = UDim.new(1, 0)
-SwitchBgCorner.Parent = SwitchBg
-
-local SwitchDot = Instance.new("Frame")
-SwitchDot.Size = UDim2.new(0, 14, 0, 14)
-SwitchDot.Position = UDim2.new(0, 2, 0.5, -7)
-SwitchDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-SwitchDot.BorderSizePixel = 0
-SwitchDot.Parent = SwitchBg
-
-local SwitchDotCorner = Instance.new("UICorner")
-SwitchDotCorner.CornerRadius = UDim.new(1, 0)
-SwitchDotCorner.Parent = SwitchDot
-
-local SpeedContainer = Instance.new("Frame")
-SpeedContainer.Size = UDim2.new(1, 0, 0, 70)
-SpeedContainer.Position = UDim2.new(0, 0, 0, 52)
-SpeedContainer.BackgroundColor3 = UIColors.CardBg
-SpeedContainer.BorderSizePixel = 0
-SpeedContainer.Parent = Content
-
-local SpeedCorner = Instance.new("UICorner")
-SpeedCorner.CornerRadius = UDim.new(0, 8)
-SpeedCorner.Parent = SpeedContainer
-
-local SpeedStroke = Instance.new("UIStroke")
-SpeedStroke.Thickness = 1
-SpeedStroke.Color = UIColors.Border
-SpeedStroke.Parent = SpeedContainer
-
-local SpeedLabel = Instance.new("TextLabel")
-SpeedLabel.Size = UDim2.new(0.5, 0, 0, 24)
-SpeedLabel.Position = UDim2.new(0, 14, 0, 6)
-SpeedLabel.BackgroundTransparency = 1
-SpeedLabel.Text = "Aura Velocity"
-SpeedLabel.Font = Enum.Font.GothamMedium
-SpeedLabel.TextSize = 11
-SpeedLabel.TextColor3 = UIColors.TextPrimary
-SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
-SpeedLabel.Parent = SpeedContainer
-
-local SpeedValue = Instance.new("TextLabel")
-SpeedValue.Size = UDim2.new(0.4, 0, 0, 24)
-SpeedValue.Position = UDim2.new(1, -114, 0, 6)
-SpeedValue.BackgroundTransparency = 1
-SpeedValue.Text = tostring(Settings.DefaultSpeed) .. " Studs/s"
-SpeedValue.Font = Enum.Font.GothamBold
-SpeedValue.TextSize = 11
-SpeedValue.TextColor3 = UIColors.Accent
-SpeedValue.TextXAlignment = Enum.TextXAlignment.Right
-SpeedValue.Parent = SpeedContainer
-
-local SliderTrack = Instance.new("TextButton")
-SliderTrack.Size = UDim2.new(1, -28, 0, 6)
-SliderTrack.Position = UDim2.new(0, 14, 0, 42)
-SliderTrack.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-SliderTrack.BorderSizePixel = 0
-SliderTrack.Text = ""
-SliderTrack.Parent = SpeedContainer
-
-local SliderTrackCorner = Instance.new("UICorner")
-SliderTrackCorner.CornerRadius = UDim.new(1, 0)
-SliderTrackCorner.Parent = SliderTrack
-
-local SliderFill = Instance.new("Frame")
-SliderFill.Size = UDim2.new((Settings.DefaultSpeed - Settings.MinSpeed) / (Settings.MaxSpeed - Settings.MinSpeed), 0, 1, 0)
-SliderFill.BackgroundColor3 = UIColors.Accent
-SliderFill.BorderSizePixel = 0
-SliderFill.Parent = SliderTrack
-
-local SliderFillCorner = Instance.new("UICorner")
-SliderFillCorner.CornerRadius = UDim.new(1, 0)
-SliderFillCorner.Parent = SliderFill
-
-local SliderHandle = Instance.new("Frame")
-SliderHandle.Size = UDim2.new(0, 14, 0, 14)
-SliderHandle.Position = UDim2.new((Settings.DefaultSpeed - Settings.MinSpeed) / (Settings.MaxSpeed - Settings.MinSpeed), -7, 0.5, -7)
-SliderHandle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-SliderHandle.BorderSizePixel = 0
-SliderHandle.Parent = SliderTrack
-
-local SliderHandleCorner = Instance.new("UICorner")
-SliderHandleCorner.CornerRadius = UDim.new(1, 0)
-SliderHandleCorner.Parent = SliderHandle
-
-local function AdjustSliderPosition(input: InputObject)
-    local width = SliderTrack.AbsoluteSize.X
-    local offset = math.clamp(input.Position.X - SliderTrack.AbsolutePosition.X, 0, width)
-    local rawPercentage = offset / width
-    
-    local calculatedSpeed = math.floor(Settings.MinSpeed + (rawPercentage * (Settings.MaxSpeed - Settings.MinSpeed)))
-    FlightState.CurrentSpeed = calculatedSpeed
-    SpeedValue.Text = tostring(calculatedSpeed) .. " Studs/s"
-    
-    SliderFill.Size = UDim2.new(rawPercentage, 0, 1, 0)
-    SliderHandle.Position = UDim2.new(rawPercentage, -7, 0.5, -7)
+-- SLIDER HELPER FUNCTION
+local function CreateSliderLogic(track, fill, knob, callback)
+    local active = false
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            active = true
+            local pct = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+            callback(pct)
+            fill.Size = UDim2.new(pct, 0, 1, 0); knob.Position = UDim2.new(pct, -7, 0.5, -7)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if active and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local pct = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+            callback(pct)
+            fill.Size = UDim2.new(pct, 0, 1, 0); knob.Position = UDim2.new(pct, -7, 0.5, -7)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then active = false end
+    end)
 end
 
-local sliderActive = false
-SliderTrack.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        sliderActive = true
-        AdjustSliderPosition(input)
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if sliderActive and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        AdjustSliderPosition(input)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        sliderActive = false
-    end
+-- =============================================================================
+-- PAGE 1: CONTROL
+-- =============================================================================
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Size = UDim2.new(1, 0, 0, 44)
+ToggleButton.BackgroundColor3 = UIColors.CardBg
+ToggleButton.BorderSizePixel = 0
+ToggleButton.Text = ""
+ToggleButton.Parent = PageControl
+Instance.new("UICorner", ToggleButton).CornerRadius = UDim.new(0, 8)
+local ToggleStroke = Instance.new("UIStroke", ToggleButton); ToggleStroke.Color = UIColors.Border
+
+local ToggleLabel = Instance.new("TextLabel")
+ToggleLabel.Size = UDim2.new(0.6, 0, 1, 0); ToggleLabel.Position = UDim2.new(0, 14, 0, 0)
+ToggleLabel.BackgroundTransparency = 1; ToggleLabel.Text = "God Flight [F]"
+ToggleLabel.Font = Enum.Font.GothamMedium; ToggleLabel.TextSize = 13; ToggleLabel.TextColor3 = UIColors.TextPrimary
+ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left; ToggleLabel.Parent = ToggleButton
+
+local SwitchBg = Instance.new("Frame")
+SwitchBg.Size = UDim2.new(0, 40, 0, 20); SwitchBg.Position = UDim2.new(1, -54, 0.5, -10)
+SwitchBg.BackgroundColor3 = UIColors.InactiveRed; SwitchBg.Parent = ToggleButton
+Instance.new("UICorner", SwitchBg).CornerRadius = UDim.new(1, 0)
+
+local SwitchDot = Instance.new("Frame")
+SwitchDot.Size = UDim2.new(0, 16, 0, 16); SwitchDot.Position = UDim2.new(0, 2, 0.5, -8)
+SwitchDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255); SwitchDot.Parent = SwitchBg
+Instance.new("UICorner", SwitchDot).CornerRadius = UDim.new(1, 0)
+
+local SpeedContainer = Instance.new("Frame")
+SpeedContainer.Size = UDim2.new(1, 0, 0, 65); SpeedContainer.Position = UDim2.new(0, 0, 0, 54)
+SpeedContainer.BackgroundColor3 = UIColors.CardBg; SpeedContainer.Parent = PageControl
+Instance.new("UICorner", SpeedContainer).CornerRadius = UDim.new(0, 8)
+
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Size = UDim2.new(0.5, 0, 0, 24); SpeedLabel.Position = UDim2.new(0, 14, 0, 8)
+SpeedLabel.BackgroundTransparency = 1; SpeedLabel.Text = "Velocity"
+SpeedLabel.Font = Enum.Font.GothamMedium; SpeedLabel.TextSize = 12; SpeedLabel.TextColor3 = UIColors.TextPrimary
+SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left; SpeedLabel.Parent = SpeedContainer
+
+local SpeedValue = Instance.new("TextLabel")
+SpeedValue.Size = UDim2.new(0.4, 0, 0, 24); SpeedValue.Position = UDim2.new(1, -114, 0, 8)
+SpeedValue.BackgroundTransparency = 1; SpeedValue.Text = tostring(Settings.DefaultSpeed) .. " Studs/s"
+SpeedValue.Font = Enum.Font.GothamBold; SpeedValue.TextSize = 12; SpeedValue.TextColor3 = UIColors.Accent
+SpeedValue.TextXAlignment = Enum.TextXAlignment.Right; SpeedValue.Parent = SpeedContainer
+
+local SpeedTrack = Instance.new("TextButton")
+SpeedTrack.Size = UDim2.new(1, -28, 0, 6); SpeedTrack.Position = UDim2.new(0, 14, 0, 42)
+SpeedTrack.BackgroundColor3 = Color3.fromRGB(40, 40, 45); SpeedTrack.Text = ""; SpeedTrack.Parent = SpeedContainer
+Instance.new("UICorner", SpeedTrack).CornerRadius = UDim.new(1, 0)
+
+local SpeedFill = Instance.new("Frame")
+local defaultPct = (Settings.DefaultSpeed - Settings.MinSpeed) / (Settings.MaxSpeed - Settings.MinSpeed)
+SpeedFill.Size = UDim2.new(defaultPct, 0, 1, 0); SpeedFill.BackgroundColor3 = UIColors.Accent; SpeedFill.Parent = SpeedTrack
+Instance.new("UICorner", SpeedFill).CornerRadius = UDim.new(1, 0)
+
+local SpeedKnob = Instance.new("Frame")
+SpeedKnob.Size = UDim2.new(0, 14, 0, 14); SpeedKnob.Position = UDim2.new(defaultPct, -7, 0.5, -7)
+SpeedKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); SpeedKnob.Parent = SpeedTrack
+Instance.new("UICorner", SpeedKnob).CornerRadius = UDim.new(1, 0)
+
+CreateSliderLogic(SpeedTrack, SpeedFill, SpeedKnob, function(pct)
+    local calculatedSpeed = math.floor(Settings.MinSpeed + (pct * (Settings.MaxSpeed - Settings.MinSpeed)))
+    FlightState.CurrentSpeed = calculatedSpeed
+    SpeedValue.Text = tostring(calculatedSpeed) .. " Studs/s"
 end)
 
 local function ToggleLogic()
     FlightState.IsActive = not FlightState.IsActive
+    local dotTarget = FlightState.IsActive and UDim2.new(0, 22, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    local bgTarget = FlightState.IsActive and UIColors.ActiveGreen or UIColors.InactiveRed
     
-    local dotTargetPosition = FlightState.IsActive and UDim2.new(0, 20, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
-    local bgTargetColor = FlightState.IsActive and UIColors.ActiveGreen or UIColors.InactiveRed
-    local strokeTargetColor = FlightState.IsActive and UIColors.ActiveGreen or UIColors.Border
+    TweenService:Create(SwitchDot, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = dotTarget}):Play()
+    TweenService:Create(SwitchBg, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundColor3 = bgTarget}):Play()
     
-    TweenService:Create(SwitchDot, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = dotTargetPosition}):Play()
-    TweenService:Create(SwitchBg, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundColor3 = bgTargetColor}):Play()
-    TweenService:Create(ToggleStroke, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Color = strokeTargetColor}):Play()
-    
-    if FlightState.IsActive then
-        StartFlightCore()
-    else
-        StopFlightCore()
-    end
+    if FlightState.IsActive then StartFlightCore() else StopFlightCore() end
 end
 
 ToggleButton.Activated:Connect(ToggleLogic)
-
-InputBeganConn = UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.KeyCode == Settings.ToggleKey then ToggleLogic() end
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Settings.ToggleKey then ToggleLogic() end
 end)
 
-local function OnDeath()
-    if FlightState.IsActive then ToggleLogic() end
+-- =============================================================================
+-- PAGE 2: AURA COLOR (HEX SCROLLER / HSV PICKER)
+-- =============================================================================
+local ColorPreview = Instance.new("Frame")
+ColorPreview.Size = UDim2.new(0, 44, 0, 44); ColorPreview.Position = UDim2.new(0, 0, 0, 0)
+ColorPreview.BackgroundColor3 = FlightState.AuraColor; ColorPreview.Parent = PageColor
+Instance.new("UICorner", ColorPreview).CornerRadius = UDim.new(0, 8)
+local cpStroke = Instance.new("UIStroke", ColorPreview); cpStroke.Color = UIColors.Border
+
+local HexBox = Instance.new("TextBox")
+HexBox.Size = UDim2.new(1, -54, 0, 44); HexBox.Position = UDim2.new(0, 54, 0, 0)
+HexBox.BackgroundColor3 = UIColors.CardBg; HexBox.Text = "#" .. FlightState.AuraColor:ToHex()
+HexBox.Font = Enum.Font.GothamMedium; HexBox.TextSize = 14; HexBox.TextColor3 = UIColors.TextPrimary
+HexBox.Parent = PageColor
+Instance.new("UICorner", HexBox).CornerRadius = UDim.new(0, 8)
+local hbStroke = Instance.new("UIStroke", HexBox); hbStroke.Color = UIColors.Border
+
+local HueLabel = Instance.new("TextLabel")
+HueLabel.Size = UDim2.new(0, 100, 0, 20); HueLabel.Position = UDim2.new(0, 0, 0, 56)
+HueLabel.BackgroundTransparency = 1; HueLabel.Text = "Hue Spectrum"
+HueLabel.Font = Enum.Font.GothamMedium; HueLabel.TextSize = 11; HueLabel.TextColor3 = UIColors.TextSecondary
+HueLabel.TextXAlignment = Enum.TextXAlignment.Left; HueLabel.Parent = PageColor
+
+local HueTrack = Instance.new("TextButton")
+HueTrack.Size = UDim2.new(1, 0, 0, 12); HueTrack.Position = UDim2.new(0, 0, 0, 76)
+HueTrack.BackgroundColor3 = Color3.fromRGB(255, 255, 255); HueTrack.Text = ""; HueTrack.Parent = PageColor
+Instance.new("UICorner", HueTrack).CornerRadius = UDim.new(1, 0)
+
+-- Rainbow Scroller Gradient
+local HueGradient = Instance.new("UIGradient")
+HueGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+    ColorSequenceKeypoint.new(0.16, Color3.fromRGB(255, 255, 0)),
+    ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+    ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 0, 255)),
+    ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+})
+HueGradient.Parent = HueTrack
+
+local HueKnob = Instance.new("Frame")
+HueKnob.Size = UDim2.new(0, 16, 0, 16); HueKnob.Position = UDim2.new(FlightState.Hue, -8, 0.5, -8)
+HueKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); HueKnob.Parent = HueTrack
+Instance.new("UICorner", HueKnob).CornerRadius = UDim.new(1, 0)
+local hkStroke = Instance.new("UIStroke", HueKnob); hkStroke.Thickness = 2; hkStroke.Color = UIColors.Background
+
+local ValLabel = Instance.new("TextLabel")
+ValLabel.Size = UDim2.new(0, 100, 0, 20); ValLabel.Position = UDim2.new(0, 0, 0, 100)
+ValLabel.BackgroundTransparency = 1; ValLabel.Text = "Brightness"
+ValLabel.Font = Enum.Font.GothamMedium; ValLabel.TextSize = 11; ValLabel.TextColor3 = UIColors.TextSecondary
+ValLabel.TextXAlignment = Enum.TextXAlignment.Left; ValLabel.Parent = PageColor
+
+local ValTrack = Instance.new("TextButton")
+ValTrack.Size = UDim2.new(1, 0, 0, 12); ValTrack.Position = UDim2.new(0, 0, 0, 120)
+ValTrack.BackgroundColor3 = Color3.fromRGB(255, 255, 255); ValTrack.Text = ""; ValTrack.Parent = PageColor
+Instance.new("UICorner", ValTrack).CornerRadius = UDim.new(1, 0)
+
+-- Black to Color Gradient
+local ValGradient = Instance.new("UIGradient")
+ValGradient.Color = ColorSequence.new(Color3.fromRGB(0, 0, 0), Color3.fromHSV(FlightState.Hue, 1, 1))
+ValGradient.Parent = ValTrack
+
+local ValKnob = Instance.new("Frame")
+ValKnob.Size = UDim2.new(0, 16, 0, 16); ValKnob.Position = UDim2.new(FlightState.Val, -8, 0.5, -8)
+ValKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); ValKnob.Parent = ValTrack
+Instance.new("UICorner", ValKnob).CornerRadius = UDim.new(1, 0)
+local vkStroke = Instance.new("UIStroke", ValKnob); vkStroke.Thickness = 2; vkStroke.Color = UIColors.Background
+
+-- Refresh Interface logic
+local function SyncColorUI()
+    local newColor = Color3.fromHSV(FlightState.Hue, FlightState.Sat, FlightState.Val)
+    FlightState.AuraColor = newColor
+    ColorPreview.BackgroundColor3 = newColor
+    HexBox.Text = "#" .. newColor:ToHex()
+    ValGradient.Color = ColorSequence.new(Color3.fromRGB(0, 0, 0), Color3.fromHSV(FlightState.Hue, 1, 1))
+    
+    HueKnob.Position = UDim2.new(FlightState.Hue, -8, 0.5, -8)
+    ValKnob.Position = UDim2.new(FlightState.Val, -8, 0.5, -8)
+    
+    UpdateVFXColor()
 end
 
-if LocalPlayer.Character then
-    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.Died:Connect(OnDeath) end
-end
-CharacterAddedConn = LocalPlayer.CharacterAdded:Connect(function(char)
-    if FlightState.IsActive then ToggleLogic() end
-    local hum = char:WaitForChild("Humanoid", 3)
-    if hum then hum.Died:Connect(OnDeath) end
+-- HSV Scroller Inputs
+local hueActive = false
+HueTrack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        hueActive = true
+        FlightState.Hue = math.clamp((input.Position.X - HueTrack.AbsolutePosition.X) / HueTrack.AbsoluteSize.X, 0, 1)
+        SyncColorUI()
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if hueActive and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        FlightState.Hue = math.clamp((input.Position.X - HueTrack.AbsolutePosition.X) / HueTrack.AbsoluteSize.X, 0, 1)
+        SyncColorUI()
+    end
 end)
 
-print("[Anime Fly V12] Transform Override Engine Engaged. Zero Animations Used.")
+local valActive = false
+ValTrack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        valActive = true
+        FlightState.Val = math.clamp((input.Position.X - ValTrack.AbsolutePosition.X) / ValTrack.AbsoluteSize.X, 0, 1)
+        SyncColorUI()
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if valActive and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        FlightState.Val = math.clamp((input.Position.X - ValTrack.AbsolutePosition.X) / ValTrack.AbsoluteSize.X, 0, 1)
+        SyncColorUI()
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        hueActive = false; valActive = false
+    end
+end)
 
+-- Hex Box Input Listener
+HexBox.FocusLost:Connect(function()
+    local text = HexBox.Text:gsub("#", "")
+    pcall(function()
+        local c = Color3.fromHex(text)
+        local h, s, v = c:ToHSV()
+        FlightState.Hue = h; FlightState.Sat = s; FlightState.Val = v
+        SyncColorUI()
+    end)
+    HexBox.Text = "#" .. FlightState.AuraColor:ToHex()
+end)
+
+print("[Anime Fly Studio V13] Loaded. Hex Scroller & Custom Aura UI Active.")
 
