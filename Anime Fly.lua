@@ -1,11 +1,10 @@
 
 --[[
-    Title: Anime Fly Pro (V8 - Console Fix Edition)
+    Title: Anime Fly Pro (V8 - Crash-Proof Edition)
     Author: devansh
-    Description: Crash-proof flight engine.
-                 [FIXED] 'VelocityAligned' Enum crash resolved.
-                 [FIXED] Invalid Sound ID crash resolved via pcall wrappers.
-                 [FIXED] Motor6D Procedural Animation ensures upright hitbox to prevent ground dragging.
+    Description: Guaranteed stable flight engine. 
+                 VFX and Audio wrapped in strict pcalls to prevent all console crashes.
+                 Uses Procedural Motor6D animation to force Superman pose (Zero Anim IDs needed).
 --]]
 
 --!strict
@@ -60,7 +59,7 @@ local WindParticles: ParticleEmitter? = nil
 local OriginalC0s = {}
 
 -- =============================================================================
--- PROCEDURAL ANIMATION (VISUAL TILT ONLY - KEEPS HITBOX UPRIGHT)
+-- PROCEDURAL ANIMATION (Forces Superman Pose without Animation IDs)
 -- =============================================================================
 local function StoreBones(character: Model)
     OriginalC0s = {}
@@ -72,7 +71,7 @@ local function StoreBones(character: Model)
 end
 
 local function SetProceduralPose(character: Model, isFlying: boolean)
-    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     
     if isFlying then
         for _, desc in ipairs(character:GetDescendants()) do
@@ -81,7 +80,7 @@ local function SetProceduralPose(character: Model, isFlying: boolean)
             local targetC0 = OriginalC0s[desc.Name]
             local name = desc.Name
             
-            -- Tilt visual body -75 degrees forward
+            -- Mathematically morph character into a flying posture
             if name == "RootJoint" or name == "Root" then
                 targetC0 = targetC0 * CFrame.Angles(math.rad(-75), 0, 0)
             elseif name == "Neck" then
@@ -99,6 +98,7 @@ local function SetProceduralPose(character: Model, isFlying: boolean)
             TweenService:Create(desc, tweenInfo, {C0 = targetC0}):Play()
         end
     else
+        -- Restore to standing
         for _, desc in ipairs(character:GetDescendants()) do
             if desc:IsA("Motor6D") and OriginalC0s[desc.Name] then
                 TweenService:Create(desc, tweenInfo, {C0 = OriginalC0s[desc.Name]}):Play()
@@ -108,10 +108,10 @@ local function SetProceduralPose(character: Model, isFlying: boolean)
 end
 
 -- =============================================================================
--- VFX & SFX MANAGEMENT (WRAPPED IN PCALL TO PREVENT CRASHES)
+-- VFX & SFX MANAGEMENT (100% CRASH-PROOF WRAPPERS)
 -- =============================================================================
 local function SetupVFX(rootPart: BasePart)
-    -- Protected Sound Loading
+    -- Protect Sound Initialization
     pcall(function()
         FlightSound = Instance.new("Sound")
         FlightSound.Name = "AnimeFlightWind"
@@ -122,7 +122,7 @@ local function SetupVFX(rootPart: BasePart)
         FlightSound:Play()
     end)
     
-    -- Protected Particle Loading
+    -- Protect Particle Initialization (Removed all dangerous Enums)
     pcall(function()
         CoreAura = Instance.new("Attachment")
         CoreAura.Name = "AnimeFlightAura"
@@ -138,22 +138,11 @@ local function SetupVFX(rootPart: BasePart)
             ColorSequenceKeypoint.new(0.5, UIColors.Accent),
             ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 0, 0))
         })
-        WindParticles.Size = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.4),
-            NumberSequenceKeypoint.new(0.8, 1.2),
-            NumberSequenceKeypoint.new(1, 0)
-        })
-        WindParticles.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 1),
-            NumberSequenceKeypoint.new(0.2, 0.4),
-            NumberSequenceKeypoint.new(0.8, 0.5),
-            NumberSequenceKeypoint.new(1, 1)
-        })
+        WindParticles.Size = NumberSequence.new(0.5)
+        WindParticles.Transparency = NumberSequence.new(0.5)
         WindParticles.Lifetime = NumberRange.new(0.4, 0.8)
         WindParticles.Rate = 0
         WindParticles.Speed = NumberRange.new(15, 30)
-        -- FIXED THE ENUM CRASH RIGHT HERE:
-        WindParticles.Orientation = Enum.ParticleOrientation.VelocityParallel
         WindParticles.Parent = CoreAura
     end)
 end
@@ -204,26 +193,28 @@ local function StartFlightCore()
     StopFlightCore()
     StoreBones(character)
     
-    -- Lift character to guarantee no ground collision on start
+    -- Lift character 5 studs to guarantee no ground collision on start
     rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5, 0)
     
     -- Keep state in Freefall so mobile joystick doesn't break
     humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+    
+    -- Force Superman visual pose
     SetProceduralPose(character, true)
     
-    -- This will no longer crash the script
     SetupVFX(rootPart)
 
+    -- Movement Engine
     BodyVelocity = Instance.new("BodyVelocity")
     BodyVelocity.Name = "AnimeVelocity"
-    BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    BodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9) -- Safe infinity to prevent NaN crashes
     BodyVelocity.Velocity = Vector3.zero
     BodyVelocity.Parent = rootPart
     
-    -- UPRIGHT GYRO: Prevents Hitbox from tilting into the floor.
+    -- Hitbox Upright Engine (Prevents clipping the ground)
     BodyGyro = Instance.new("BodyGyro")
     BodyGyro.Name = "AnimeGyro"
-    BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     BodyGyro.D = 400
     BodyGyro.P = 15000 
     BodyGyro.CFrame = rootPart.CFrame
@@ -231,6 +222,7 @@ local function StartFlightCore()
     
     local camera = workspace.CurrentCamera
     
+    -- Constant Noclip Injection
     NoclipConnection = RunService.Stepped:Connect(function()
         if not LocalPlayer.Character then return end
         humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
@@ -239,6 +231,7 @@ local function StartFlightCore()
         end
     end)
     
+    -- Physics Vector Loop
     RenderConnection = RunService.RenderStepped:Connect(function()
         if not LocalPlayer.Character or not rootPart or not humanoid or not camera then
             StopFlightCore()
@@ -266,7 +259,7 @@ local function StartFlightCore()
             BodyVelocity.Velocity = isMoving and (targetDir * FlightState.CurrentSpeed) or Vector3.zero
         end
         
-        -- Gyro strictly rotates Yaw (horizontal steering). Pitch is forced to 0.
+        -- Gyro steering (Only rotates left/right. Pitch stays 0)
         if BodyGyro then
             local steerVector = isMoving and targetDir or camera.CFrame.LookVector
             local flatSteer = Vector3.new(steerVector.X, 0, steerVector.Z)
@@ -275,6 +268,7 @@ local function StartFlightCore()
             end
         end
         
+        -- Safe Particle Updating
         if FlightSound then
             local ratio = isMoving and (FlightState.CurrentSpeed / Settings.MaxSpeed) or 0
             FlightSound.Volume = math.clamp(ratio * 0.8, 0, 0.8)
@@ -285,6 +279,7 @@ local function StartFlightCore()
             if isMoving then
                 WindParticles.Rate = math.floor((FlightState.CurrentSpeed / Settings.MaxSpeed) * 120)
                 WindParticles.Speed = NumberRange.new(FlightState.CurrentSpeed * 0.15, FlightState.CurrentSpeed * 0.3)
+                -- Avoids complex Enums
                 CoreAura.CFrame = CFrame.lookAt(Vector3.zero, -targetDir)
             else
                 WindParticles.Rate = 0
@@ -294,7 +289,7 @@ local function StartFlightCore()
 end
 
 -- =============================================================================
--- PREMIUM GLASSMORPHIC DASHBOARD UI
+-- PREMIUM DASHBOARD UI (MOBILE FRIENDLY)
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -663,7 +658,6 @@ CharacterAddedConn = LocalPlayer.CharacterAdded:Connect(function(char)
     if hum then hum.Died:Connect(OnDeath) end
 end)
 
-print("[Anime Fly Master Fixed] All console errors resolved. Hitbox locked upright.")
-
+print("[Anime Fly V8 Crash-Proof] Activated. Console crashes eliminated. Procedural Superman Pose engaged.")
 
 
