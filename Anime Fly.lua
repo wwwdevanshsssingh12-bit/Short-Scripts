@@ -1,10 +1,10 @@
 
 --[[
-    Title: Anime Fly Pro (V9 - Super Saiyan Edition)
+    Title: Anime Fly Pro (V10 - Cinematic God Edition)
     Author: devansh
-    Description: Elite Anime Flight Engine. Features hands-behind-back procedural animation, 
-                 dual-state hover/fly poses, multi-layered Super Saiyan golden aura VFX, 
-                 dynamic wind SFX, and flawless Battlegrounds anti-cheat bypasses.
+    Description: The absolute peak of Roblox flight scripts. 
+                 Features Dynamic FOV Warping, Sonic Boom takeoffs, 
+                 God-Tier idle/flight procedural animations, and flawless Anti-Cheat Bypasses.
 --]]
 
 --!strict
@@ -25,8 +25,11 @@ local Settings = {
     MaxSpeed = 500,
     MinSpeed = 15,
     ToggleKey = Enum.KeyCode.F,
-    WindSoundId = "rbxassetid://9011181313", -- Intense Wind
-    AuraSoundId = "rbxassetid://4944983210"  -- Deep Energy Hum
+    
+    -- Cinematic Audio Assets
+    WindSoundId = "rbxassetid://9011181313",  -- Intense Wind Loop
+    AuraSoundId = "rbxassetid://4944983210",  -- Deep Energy Hum
+    BoomSoundId = "rbxassetid://6063618146"   -- Sonic Boom Takeoff
 }
 
 local FlightState = {
@@ -37,12 +40,12 @@ local FlightState = {
 
 local UIColors = {
     Background = Color3.fromRGB(15, 15, 20),
-    Border = Color3.fromRGB(50, 40, 30),
-    Accent = Color3.fromRGB(255, 170, 0), -- Super Saiyan Gold
+    Border = Color3.fromRGB(40, 50, 80),
+    Accent = Color3.fromRGB(80, 150, 255), -- Glowing Gojo/God Blue
     TextPrimary = Color3.fromRGB(255, 255, 255),
     TextSecondary = Color3.fromRGB(180, 180, 190),
     CardBg = Color3.fromRGB(25, 25, 30),
-    ActiveGreen = Color3.fromRGB(255, 170, 0), -- Replaced green with Gold
+    ActiveGreen = Color3.fromRGB(80, 150, 255),
     InactiveRed = Color3.fromRGB(150, 50, 50)
 }
 
@@ -52,9 +55,10 @@ local BodyGyro: BodyGyro? = nil
 local RenderConnection: RBXScriptConnection? = nil
 local NoclipConnection: RBXScriptConnection? = nil
 
--- VFX Storage
+-- VFX/SFX Storage
 local WindSound: Sound? = nil
 local AuraSound: Sound? = nil
+local BoomSound: Sound? = nil
 local CoreAuraAttach: Attachment? = nil
 local AuraEmitter: ParticleEmitter? = nil
 local SparkEmitter: ParticleEmitter? = nil
@@ -65,7 +69,7 @@ local OriginalC0s = {}
 local ActiveTweens = {}
 
 -- =============================================================================
--- PROCEDURAL ANIMATION (Hover & Hands-Behind-Back Flight)
+-- PROCEDURAL ANIMATION (GOD HOVER & SUPERSONIC FLIGHT)
 -- =============================================================================
 local function StoreBones(character: Model)
     OriginalC0s = {}
@@ -77,15 +81,15 @@ local function StoreBones(character: Model)
 end
 
 local function CancelTweens()
-    for _, tween in pairs(ActiveTweens) do
-        tween:Cancel()
-    end
+    for _, tween in pairs(ActiveTweens) do tween:Cancel() end
     ActiveTweens = {}
 end
 
 local function SetProceduralPose(character: Model, state: string)
     CancelTweens()
-    local tweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    -- Faster tweening for moving, slower for entering idle
+    local duration = (state == "Fly") and 0.25 or 0.5
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
     
     for _, desc in ipairs(character:GetDescendants()) do
         if not desc:IsA("Motor6D") or not OriginalC0s[desc.Name] then continue end
@@ -94,37 +98,36 @@ local function SetProceduralPose(character: Model, state: string)
         local name = desc.Name
         
         if state == "Fly" then
-            -- SUPER SONIC FLIGHT POSE (Leaning forward, hands swept back)
-            if name == "RootJoint" or name == "Root" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(-75), 0, 0)
+            -- 🚀 SUPERSONIC FLIGHT POSE (Aerodynamic)
+            if name == "RootJoint" or name == "Root" or name == "Waist" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-80), 0, 0)
             elseif name == "Neck" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(65), 0, 0)
-            elseif name == "Right Shoulder" or name == "RightShoulder" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(110), 0, math.rad(-20)) -- Hands swept back
-            elseif name == "Left Shoulder" or name == "LeftShoulder" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(110), 0, math.rad(20))  -- Hands swept back
-            elseif name == "Right Hip" or name == "RightHip" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(75), 0, 0) -- Look sharply forward
+            elseif string.find(name, "Right.*Shoulder") or name == "RightUpperArm" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(130), 0, math.rad(-10)) -- Arms strictly behind back
+            elseif string.find(name, "Left.*Shoulder") or name == "LeftUpperArm" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(130), 0, math.rad(10))
+            elseif string.find(name, "Right.*Hip") or name == "RightUpperLeg" then
                 targetC0 = targetC0 * CFrame.Angles(math.rad(-10), 0, 0)
-            elseif name == "Left Hip" or name == "LeftHip" then
+            elseif string.find(name, "Left.*Hip") or name == "LeftUpperLeg" then
                 targetC0 = targetC0 * CFrame.Angles(math.rad(-10), 0, 0)
             end
         elseif state == "Hover" then
-            -- IDLE HOVER POSE (Upright, channeling aura)
-            if name == "RootJoint" or name == "Root" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(5), 0, 0)
+            -- 👑 GOD HOVER IDLE POSE (Casual, Floating)
+            if name == "RootJoint" or name == "Root" or name == "Waist" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(10), math.rad(15), 0) -- Slight majestic twist
             elseif name == "Neck" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(10), 0, 0)
-            elseif name == "Right Shoulder" or name == "RightShoulder" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(15), 0, math.rad(25)) -- Arms slightly out
-            elseif name == "Left Shoulder" or name == "LeftShoulder" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(15), 0, math.rad(-25)) -- Arms slightly out
-            elseif name == "Right Hip" or name == "RightHip" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(-15), 0, math.rad(10)) -- Legs apart
-            elseif name == "Left Hip" or name == "LeftHip" then
-                targetC0 = targetC0 * CFrame.Angles(math.rad(-15), 0, math.rad(-10)) -- Legs apart
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-10), math.rad(-15), 0) -- Look down upon enemies
+            elseif string.find(name, "Right.*Shoulder") or name == "RightUpperArm" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-15), 0, math.rad(15)) -- Arm resting
+            elseif string.find(name, "Left.*Shoulder") or name == "LeftUpperArm" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(20), 0, math.rad(-20)) -- Arm floating up slightly
+            elseif string.find(name, "Right.*Hip") or name == "RightUpperLeg" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(15), 0, math.rad(5)) -- Leg relaxed forward
+            elseif string.find(name, "Left.*Hip") or name == "LeftUpperLeg" then
+                targetC0 = targetC0 * CFrame.Angles(math.rad(-15), 0, math.rad(-5)) -- Leg kicked back slightly
             end
         end
-        -- Default state implicitly resets to OriginalC0
         
         local tween = TweenService:Create(desc, tweenInfo, {C0 = targetC0})
         table.insert(ActiveTweens, tween)
@@ -133,12 +136,11 @@ local function SetProceduralPose(character: Model, state: string)
 end
 
 -- =============================================================================
--- VFX & SFX: SUPER SAIYAN GOLDEN AURA ENGINE
+-- CINEMATIC VFX & SFX ENGINE (Pcall Protected)
 -- =============================================================================
 local function SetupVFX(rootPart: BasePart)
     pcall(function()
         WindSound = Instance.new("Sound")
-        WindSound.Name = "AnimeWind"
         WindSound.SoundId = Settings.WindSoundId
         WindSound.Volume = 0
         WindSound.Looped = true
@@ -146,88 +148,86 @@ local function SetupVFX(rootPart: BasePart)
         WindSound:Play()
         
         AuraSound = Instance.new("Sound")
-        AuraSound.Name = "AnimeAura"
         AuraSound.SoundId = Settings.AuraSoundId
-        AuraSound.Volume = 0.6
-        AuraSound.Pitch = 1.2
+        AuraSound.Volume = 0.5
+        AuraSound.Pitch = 0.9
         AuraSound.Looped = true
         AuraSound.Parent = rootPart
         AuraSound:Play()
+        
+        BoomSound = Instance.new("Sound")
+        BoomSound.SoundId = Settings.BoomSoundId
+        BoomSound.Volume = 1.5
+        BoomSound.Pitch = 1.2
+        BoomSound.Parent = rootPart
     end)
     
     pcall(function()
         CoreAuraAttach = Instance.new("Attachment")
-        CoreAuraAttach.Name = "SuperSaiyanAura"
-        CoreAuraAttach.Position = Vector3.new(0, -1, 0)
+        CoreAuraAttach.Name = "CinematicAura"
+        CoreAuraAttach.Position = Vector3.new(0, 0, 0)
         CoreAuraAttach.Parent = rootPart
         
-        local GoldGradient = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 230, 100)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 150, 0)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 50, 0))
+        local EnergyColor = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 200, 255)),
+            ColorSequenceKeypoint.new(0.5, UIColors.Accent),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 50, 255))
         })
         
-        -- The Burning Aura
+        -- Core Glowing Aura
         AuraEmitter = Instance.new("ParticleEmitter")
-        AuraEmitter.Name = "AuraGlow"
         AuraEmitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
         AuraEmitter.LightEmission = 1
-        AuraEmitter.Color = GoldGradient
-        AuraEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.5), NumberSequenceKeypoint.new(1, 0)})
-        AuraEmitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 1)})
-        AuraEmitter.Lifetime = NumberRange.new(0.4, 0.6)
-        AuraEmitter.Rate = 80
-        AuraEmitter.Speed = NumberRange.new(5, 10)
-        AuraEmitter.EmissionDirection = Enum.NormalId.Top
+        AuraEmitter.Color = EnergyColor
+        AuraEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 2.5), NumberSequenceKeypoint.new(1, 0)})
+        AuraEmitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 1)})
+        AuraEmitter.Lifetime = NumberRange.new(0.5, 0.8)
+        AuraEmitter.Rate = 60
+        AuraEmitter.Speed = NumberRange.new(2, 5)
         AuraEmitter.Parent = CoreAuraAttach
         
-        -- High Velocity Sparks
+        -- Power Sparks
         SparkEmitter = Instance.new("ParticleEmitter")
-        SparkEmitter.Name = "AuraSparks"
         SparkEmitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
         SparkEmitter.LightEmission = 1
-        SparkEmitter.Color = GoldGradient
-        SparkEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 0)})
-        SparkEmitter.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
-        SparkEmitter.Lifetime = NumberRange.new(0.2, 0.5)
-        SparkEmitter.Rate = 60
-        SparkEmitter.Speed = NumberRange.new(15, 25)
-        SparkEmitter.EmissionDirection = Enum.NormalId.Top
-        SparkEmitter.SpreadAngle = Vector2.new(20, 20)
+        SparkEmitter.Color = EnergyColor
+        SparkEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 0)})
+        SparkEmitter.Transparency = NumberSequence.new(0.2)
+        SparkEmitter.Lifetime = NumberRange.new(0.3, 0.6)
+        SparkEmitter.Rate = 50
+        SparkEmitter.Speed = NumberRange.new(10, 20)
+        SparkEmitter.SpreadAngle = Vector2.new(45, 45)
         SparkEmitter.Parent = CoreAuraAttach
         
-        -- Flight Streaks (Only visible when moving)
+        -- High Speed Wind Streaks
         StreakEmitter = Instance.new("ParticleEmitter")
-        StreakEmitter.Name = "FlightStreaks"
         StreakEmitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
         StreakEmitter.LightEmission = 1
         StreakEmitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-        StreakEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 0)})
-        StreakEmitter.Transparency = NumberSequence.new(0.5)
-        StreakEmitter.Lifetime = NumberRange.new(0.3, 0.5)
+        StreakEmitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 0)})
+        StreakEmitter.Transparency = NumberSequence.new(0.6)
+        StreakEmitter.Lifetime = NumberRange.new(0.2, 0.4)
         StreakEmitter.Rate = 0
-        StreakEmitter.Speed = NumberRange.new(30, 60)
+        StreakEmitter.Speed = NumberRange.new(40, 80)
         StreakEmitter.Parent = CoreAuraAttach
     end)
 end
 
 local function CleanupVFX()
-    if WindSound then
-        TweenService:Create(WindSound, TweenInfo.new(0.3), {Volume = 0}):Play()
-        task.delay(0.3, function() if WindSound then WindSound:Destroy() end end)
-        WindSound = nil
+    local instances = {WindSound, AuraSound, BoomSound}
+    for _, sound in ipairs(instances) do
+        if sound then
+            TweenService:Create(sound, TweenInfo.new(0.3), {Volume = 0}):Play()
+            task.delay(0.3, function() if sound and sound.Parent then sound:Destroy() end end)
+        end
     end
-    if AuraSound then
-        TweenService:Create(AuraSound, TweenInfo.new(0.3), {Volume = 0}):Play()
-        task.delay(0.3, function() if AuraSound then AuraSound:Destroy() end end)
-        AuraSound = nil
-    end
+    WindSound, AuraSound, BoomSound = nil, nil, nil
     if CoreAuraAttach then CoreAuraAttach:Destroy(); CoreAuraAttach = nil end
-    AuraEmitter = nil; SparkEmitter = nil; StreakEmitter = nil
+    AuraEmitter, SparkEmitter, StreakEmitter = nil, nil, nil
 end
 
 -- =============================================================================
--- FLIGHT PHYSICS ENGINE (NOCLIP + UPRIGHT HITBOX)
+-- CINEMATIC PHYSICS ENGINE (FOV WARPING & NOCLIP)
 -- =============================================================================
 local function StopFlightCore()
     if RenderConnection then RenderConnection:Disconnect(); RenderConnection = nil end
@@ -236,6 +236,13 @@ local function StopFlightCore()
     if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
     
     FlightState.IsMoving = false
+    
+    -- Smoothly reset camera FOV
+    local camera = workspace.CurrentCamera
+    if camera then
+        TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine), {FieldOfView = 70}):Play()
+    end
+    
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -260,10 +267,7 @@ local function StartFlightCore()
     StopFlightCore()
     StoreBones(character)
     
-    -- Lift character to guarantee no ground collision on start
     rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5, 0)
-    
-    -- Freefall injected to keep mobile joystick alive
     humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
     
     FlightState.IsMoving = false
@@ -276,7 +280,6 @@ local function StartFlightCore()
     BodyVelocity.Velocity = Vector3.zero
     BodyVelocity.Parent = rootPart
     
-    -- Hitbox Upright Engine (Prevents clipping the ground)
     BodyGyro = Instance.new("BodyGyro")
     BodyGyro.Name = "AnimeGyro"
     BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
@@ -287,7 +290,6 @@ local function StartFlightCore()
     
     local camera = workspace.CurrentCamera
     
-    -- Constant Noclip Injection
     NoclipConnection = RunService.Stepped:Connect(function()
         if not LocalPlayer.Character then return end
         humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
@@ -296,8 +298,7 @@ local function StartFlightCore()
         end
     end)
     
-    -- Physics & VFX Loop
-    RenderConnection = RunService.RenderStepped:Connect(function()
+    RenderConnection = RunService.RenderStepped:Connect(function(deltaTime)
         if not LocalPlayer.Character or not rootPart or not humanoid or not camera then
             StopFlightCore()
             return
@@ -306,12 +307,27 @@ local function StartFlightCore()
         local moveDir = humanoid.MoveDirection
         local isCurrentlyMoving = moveDir.Magnitude > 0
         
-        -- State Machine Trigger for Animations
+        -- =========================================================
+        -- CINEMATIC TAKEOFF & FOV WARPING
+        -- =========================================================
         if isCurrentlyMoving ~= FlightState.IsMoving then
             FlightState.IsMoving = isCurrentlyMoving
             SetProceduralPose(LocalPlayer.Character, FlightState.IsMoving and "Fly" or "Hover")
+            
+            -- Sonic Boom Trigger
+            if isCurrentlyMoving and BoomSound then
+                BoomSound:Play()
+                if SparkEmitter then SparkEmitter:Emit(40) end -- Burst of sparks on takeoff
+            end
         end
         
+        -- Dynamic Camera FOV Zoom
+        local targetFOV = isCurrentlyMoving and (70 + (FlightState.CurrentSpeed / Settings.MaxSpeed) * 45) or 70
+        camera.FieldOfView = camera.FieldOfView + (targetFOV - camera.FieldOfView) * (deltaTime * 6)
+        
+        -- =========================================================
+        -- 3D VECTOR MATH & FLIGHT
+        -- =========================================================
         local targetDir = Vector3.zero
         if isCurrentlyMoving then
             local camCF = camera.CFrame
@@ -330,7 +346,6 @@ local function StartFlightCore()
             BodyVelocity.Velocity = isCurrentlyMoving and (targetDir * FlightState.CurrentSpeed) or Vector3.zero
         end
         
-        -- Gyro steering (Rotates Yaw only. Pitch stays 0 for Noclip safety)
         if BodyGyro then
             local steerVector = isCurrentlyMoving and targetDir or camera.CFrame.LookVector
             local flatSteer = Vector3.new(steerVector.X, 0, steerVector.Z)
@@ -339,32 +354,33 @@ local function StartFlightCore()
             end
         end
         
-        -- Dynamic Aura, Streaks, & Audio
+        -- =========================================================
+        -- DYNAMIC VFX SCALING
+        -- =========================================================
         if WindSound and AuraSound then
             local ratio = isCurrentlyMoving and (FlightState.CurrentSpeed / Settings.MaxSpeed) or 0
-            WindSound.Volume = math.clamp(ratio * 0.9, 0, 0.9)
-            WindSound.Pitch = math.clamp(0.8 + (ratio * 0.8), 0.8, 1.6)
-            AuraSound.Pitch = isCurrentlyMoving and 1.5 or 1.2
+            WindSound.Volume = math.clamp(ratio * 1.2, 0, 1.2)
+            WindSound.Pitch = math.clamp(0.8 + (ratio * 1.5), 0.8, 2.0)
+            AuraSound.Pitch = isCurrentlyMoving and 1.8 or 1.0
+            AuraSound.Volume = isCurrentlyMoving and 0.8 or 0.5
         end
         
         if CoreAuraAttach then
             if isCurrentlyMoving then
                 CoreAuraAttach.CFrame = CFrame.lookAt(Vector3.zero, -targetDir)
-                if StreakEmitter then StreakEmitter.Rate = math.floor((FlightState.CurrentSpeed / Settings.MaxSpeed) * 150) end
-                if AuraEmitter then AuraEmitter.Rate = 120 end
-                if SparkEmitter then SparkEmitter.Rate = 100 end
+                if StreakEmitter then StreakEmitter.Rate = math.floor((FlightState.CurrentSpeed / Settings.MaxSpeed) * 200) end
+                if AuraEmitter then AuraEmitter.Rate = 150 end
             else
-                CoreAuraAttach.CFrame = CFrame.Angles(math.rad(90), 0, 0) -- Point Aura up when idle
+                CoreAuraAttach.CFrame = CFrame.Angles(math.rad(90), 0, 0)
                 if StreakEmitter then StreakEmitter.Rate = 0 end
-                if AuraEmitter then AuraEmitter.Rate = 80 end
-                if SparkEmitter then SparkEmitter.Rate = 50 end
+                if AuraEmitter then AuraEmitter.Rate = 60 end
             end
         end
     end)
 end
 
 -- =============================================================================
--- PREMIUM GOLDEN DASHBOARD UI
+-- PREMIUM GLASSMORPHIC DASHBOARD UI
 -- =============================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -393,7 +409,7 @@ UICorner.CornerRadius = UDim.new(0, 14)
 UICorner.Parent = MainFrame
 
 local UIStroke = Instance.new("UIStroke")
-UIStroke.Thickness = 2
+UIStroke.Thickness = 1.8
 UIStroke.Color = UIColors.Border
 UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 UIStroke.Parent = MainFrame
@@ -472,11 +488,6 @@ MinBtn.Parent = Header
 local MinBtnCorner = Instance.new("UICorner")
 MinBtnCorner.CornerRadius = UDim.new(0, 8)
 MinBtnCorner.Parent = MinBtn
-
-local MinBtnStroke = Instance.new("UIStroke")
-MinBtnStroke.Thickness = 1
-MinBtnStroke.Color = UIColors.Border
-MinBtnStroke.Parent = MinBtn
 
 local RestoreBubble = Instance.new("TextButton")
 RestoreBubble.Size = UDim2.new(0, 52, 0, 52)
@@ -563,7 +574,7 @@ local ToggleLabel = Instance.new("TextLabel")
 ToggleLabel.Size = UDim2.new(0.6, 0, 1, 0)
 ToggleLabel.Position = UDim2.new(0, 14, 0, 0)
 ToggleLabel.BackgroundTransparency = 1
-ToggleLabel.Text = "Super Saiyan [F]"
+ToggleLabel.Text = "God Flight [F]"
 ToggleLabel.Font = Enum.Font.GothamMedium
 ToggleLabel.TextSize = 12
 ToggleLabel.TextColor3 = UIColors.TextPrimary
@@ -612,7 +623,7 @@ local SpeedLabel = Instance.new("TextLabel")
 SpeedLabel.Size = UDim2.new(0.5, 0, 0, 24)
 SpeedLabel.Position = UDim2.new(0, 14, 0, 6)
 SpeedLabel.BackgroundTransparency = 1
-SpeedLabel.Text = "Engine Velocity"
+SpeedLabel.Text = "Aura Velocity"
 SpeedLabel.Font = Enum.Font.GothamMedium
 SpeedLabel.TextSize = 11
 SpeedLabel.TextColor3 = UIColors.TextPrimary
@@ -733,6 +744,6 @@ CharacterAddedConn = LocalPlayer.CharacterAdded:Connect(function(char)
     if hum then hum.Died:Connect(OnDeath) end
 end)
 
-print("[Anime Fly V9 - Super Saiyan] Activated. Dual-State Poses, Aura VFX, & Audio Loaded.")
+print("[Anime Fly Cinematic God] V10 Loaded. FOV Warping & Sonic Boom Active.")
 
 
